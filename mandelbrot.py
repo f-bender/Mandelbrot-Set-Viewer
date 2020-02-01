@@ -32,6 +32,8 @@ class Mandelbrot:
                 return i
         return -1
 
+    def close(self): pass
+
 
 colormap = Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)], cyclic=True)
 iterations = 200

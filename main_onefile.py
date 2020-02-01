@@ -6,37 +6,29 @@ import time
 from mandelbrot import Mandelbrot
 import multiprocessing as mp
 import warnings
-import time
-from colormap import Colormap
 import ctypes as c
 import itertools
 
-# # z_center: complex number,  width: range of numbers on the complex plane that are mapped to the width of the image,  w,h: width, height of image
-# def get_image_array(z_center, z_width, w,h):
-#     # TODO: Multi threaded
-#     return numpy.array([[  self.colormap.get_color(self.iterations_until_escape(z_center + complex( (x/w - 0.5)*z_width, -(y/w - h/(2*w))*z_width ))*self.color_cycle_speed/self.iterations)   for x in range(w)] for y in range(h)], dtype=numpy.uint8())
-#     # same thing more readable but about 20% less efficient:
-#     # array = numpy.empty((w,h,3), dtype=numpy.uint8())
-#     # for y in range(h):
-#     #     for x in range(w):
-#     #         c = z_center + complex( (x/w - 0.5)*width, -(y/w - h/(2*w))*width)
-#     #         array[y,x] = self.colormap.get_color(self.iterations_until_escape(c)*self.color_cycle_speed/self.iterations)
-#     # return array
+
+# TODO: in KLASSE umwandeln, am besten Unterklasse von Frame (oder Panel oder sowas), mit mandelbrot-objekt und Canvas etc als Attribute (self.)
+
+
+
 cmap = Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True)
 iterations = 600
 color_cycle_speed = 5
 
-def get_color(x,y,w,h,z_center,z_width):
+def get_color(x,y,w,h,z_center,z_width,iters):
     # iters = iterations_until_escape( z_center + complex( (x/w - 0.5)*z_width, -(y/w - h/(2*w))*z_width ) )
     # if iters == -1:
     #     return (0,0,0)
     # return (255-iters,255-iters,255-iters)
-    return cmap.get_color(iterations_until_escape(z_center + complex( (x/w - 0.5)*z_width, -(y/w - h/(2*w))*z_width ))*color_cycle_speed/iterations)
+    return cmap.get_color(iterations_until_escape(z_center + complex( (x/w - 0.5)*z_width, -(y/w - h/(2*w))*z_width ),iters)/120)
 
 
-def iterations_until_escape(c):
+def iterations_until_escape(c,iters):
     z = c
-    for i in range(iterations):
+    for i in range(iters):
         z = z*z + c
         if abs(z) >= 2:
             return i
@@ -45,36 +37,46 @@ def iterations_until_escape(c):
 
 
 
-def func(x,y,w,h,z_center,z_width):
+def func(x,y,w,h,z_center,z_width,iters):
     #ignore the PEP 3118 buffer warning
     with warnings.catch_warnings():
         warnings.simplefilter('ignore', RuntimeWarning)
         # w,h = 800,800
 
-        arr = numpy.frombuffer(shared.get_obj(), dtype=numpy.uint8()) # arr and shared share the same memory
+        arr = numpy.frombuffer(var_dict["array"], dtype=numpy.uint8()) # arr and shared share the same memory
         # make it three-dimensional
         b = arr.reshape((w,h,3)) # b and arr share the same memory
 
-        b[x,y] = get_color(x,y,w,h,z_center,z_width)
+        b[x,y] = get_color(x,y,w,h,z_center,z_width,iters)
         # b[ (n//(h*3)) % w, (n//3) % h ] = (n,n+1,n+2)
 
-shared = None
+var_dict = {}
 def _init(a):
-    global shared
-    shared = a
+    # global shared
+    var_dict["array"] = a
 
-def get_image_array_multithreaded():
+def get_image_array_multithreaded(iters, wid, hei,z_center,z_width):
+
+    # !!! Consider partly rolling back to the last version on GitHub
+
     # a = mp.Array(c.c_uint8, w*h*3)
+    # temporary = False
+    # if wid*hei*3 != len(a):
+    temp = mp.RawArray(c.c_uint8, wid*hei*3)
+        # temporary = True
+    pool = mp.Pool(processes=16, initializer=_init, initargs=(temp,))
+    # else:
+    #     a = mp.Array(c.c_uint8, w*h*3)
+    #     pool = mp.Pool(processes=10, initializer=_init, initargs=(a,))
 
-    # pool = mp.Pool(processes=10, initializer=_init, initargs=(a,))
-
-    pool.starmap(func, (tup+(w,h,z_center,z_width) for tup in itertools.product(range(w),range(h)) ))
+    pool.starmap(func, (tup+(wid,hei,z_center,z_width,iters) for tup in itertools.product(range(wid),range(hei)) ))
     # pool.starmap(func, zip(range(0,w*h*3,3), (w for _ in range(w*h)), (w for _ in range(w*h)), [processes]*w*h)) # seemingly worse performance
     
     # pool.close()
-
-    b = numpy.frombuffer(a.get_obj(), dtype=numpy.uint8()).reshape((w,h,3))
-    return b
+    # if temporary:
+    return numpy.frombuffer(temp, dtype=numpy.uint8()).reshape((wid,hei,3))
+    # b = numpy.frombuffer(a.get_obj(), dtype=numpy.uint8()).reshape((wid,hei,3))
+    # return b
 
 
 if __name__ == '__main__':
@@ -83,7 +85,7 @@ if __name__ == '__main__':
 
     # print(list(zip(range(0,w*h*3,3),[w]*w*h,[h]*w*h))
     
-    a = mp.Array(c.c_uint8, w*h*3)
+    a = mp.RawArray(c.c_uint8, w*h*3)
     pool = mp.Pool(processes=processes, initializer=_init, initargs=(a,))
     
     root = Tk()
@@ -106,7 +108,7 @@ if __name__ == '__main__':
 
     # cmap_image = numpy.array([[cmap.get_color((x+y)/h) for x in range(w)] for y in range(h)], dtype=numpy.uint8())
     # mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-    mandelbrot = get_image_array_multithreaded()
+    mandelbrot = get_image_array_multithreaded(iters=iterations, wid=w, hei=h)
 
     eend = time.time()
     print(eend-sstart,"seconds")
@@ -147,7 +149,7 @@ if __name__ == '__main__':
         z_width *= rect_width/w
         start = time.time()
         # new_mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-        new_mandelbrot = get_image_array_multithreaded()
+        new_mandelbrot = get_image_array_multithreaded(iters=iterations, wid=w, hei=h)
         end = time.time()
         print(end-start)
         current_view = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(new_mandelbrot,0,1)))
@@ -161,7 +163,7 @@ if __name__ == '__main__':
         z_width *= w/rect_width
         start = time.time()
         # new_mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-        new_mandelbrot = get_image_array_multithreaded()
+        new_mandelbrot = get_image_array_multithreaded(iters=iterations, wid=w, hei=h)
         end = time.time()
         print(end-start)
         current_view = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(new_mandelbrot,0,1)))
@@ -172,12 +174,20 @@ if __name__ == '__main__':
         canvas.create_image(0,0,image=current_view, anchor=NW)
     root.bind("<Leave>", on_leave)
 
+    def keydown(event):
+        if event.char == 's':
+            Image.fromarray(numpy.swapaxes(get_image_array_multithreaded(iters=10000,wid=1920*4,hei=1080*4),0,1)).save(f"output/{z_center}_{z_width}.png", "PNG", optimize=True)
+
+
+    root.bind("<KeyPress>", keydown)
+
     def on_closing():
         pool.close()
         root.destroy()
     root.protocol("WM_DELETE_WINDOW", on_closing)
 
     root.mainloop()
+
 
 # TODO: Ablity to save image of current view with custom resolution, and custom number of iterations (=accuracy of the image)
 # + eventually adding GUI elements that display current zoomlevel and center (make the previous thing a button then)
