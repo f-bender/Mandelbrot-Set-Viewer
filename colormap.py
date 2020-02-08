@@ -13,11 +13,9 @@ class Colormap:
     def get_color(self,map_value):
         if map_value < 0:
             return (0,0,0)
-        if map_value >= 1:
-            if self.cyclic:
-                map_value = map_value % 1
-            else:
-                raise ValueError("map_value parameter of get_color function has to be between 0 and 1 for a non-cyclic Colormap")
+        if not self.cyclic and (map_value > 1 or map_value < 0):
+            raise ValueError("map_value parameter of get_color function has to be between 0 and 1 for a non-cyclic Colormap")
+        map_value = map_value % 1
 
         section_nr, dist_in_section = divmod(map_value, 1/(len(self.nodes)-1))
         dist_in_section_normalized = dist_in_section*(len(self.nodes)-1)

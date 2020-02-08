@@ -1,197 +1,181 @@
 from tkinter import *
 from PIL import Image, ImageTk
 import numpy
-from colormap import Colormap
-import time
-from mandelbrot import Mandelbrot
-import multiprocessing as mp
-import warnings
 import time
 from colormap import Colormap
-import ctypes as c
-import itertools
+from mandelbrot_image_multiprocessing import get_image_array
+import threading
 
 
 # TODO: in KLASSE umwandeln, am besten Unterklasse von Frame (oder Panel oder sowas), mit mandelbrot-objekt und Canvas etc als Attribute (self.)
 
 class FractalFrame(Frame):
 
-    def __init__(self,fractal=Mandelbrot(),width=1000, height=1000,
+    def __init__(self,master=None,width=1000, height=1000, iterations=200, color_cycle_speed=5, zoom_level=0.25, z_center=0+0j,
                 colormap=Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True) ):
-        self.fractal = fractal
-        self.width = width
+        assert width >= 200 and height >= 100 , "Minimum dimensions are 200x100"
+        super().__init__(master)
+        self.master = master
+        self.fractal_image_getter = get_image_array
+        self.complete_width = width
+        # width of the image (the Frame without the control panel)
+        self.width = int(min(0.9*self.complete_width,self.complete_width-100))
         self.height = height
         self.colormap = colormap
+        self.iterations = iterations
+        self.color_cycle_speed = color_cycle_speed
+        self.canvas = Canvas(self, width=width, height=height)
+        # Label(self, text = 'Length:').grid(row = 1, column = 2)
+        self.canvas.pack()
+        self.z_width = 1/zoom_level
+        self.z_center = z_center
+        self.rect_width = width/10
+        # Control Panel: a frame on the right side of this FractalFrame, to have some direct 
+        # control over and display of the parameters (e.g. zoom_level, z-center, iterations)
+        self.control_panel = Frame(self)
+        self.control_panel.place(x=self.width, width=self.complete_width-self.width, y=0, height=self.height)
 
-cmap = Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True)
-iterations = 600
-color_cycle_speed = 5
+        self.default_view = self.get_image()
+        self.default_parameters = (self.z_width, self.z_center, self.iterations)
+        self.current_view = self.default_view
+        self.redraw()
 
-def get_color(x,y,w,h,z_center,z_width,iters):
-    # iters = iterations_until_escape( z_center + complex( (x/w - 0.5)*z_width, -(y/w - h/(2*w))*z_width ) )
-    # if iters == -1:
-    #     return (0,0,0)
-    # return (255-iters,255-iters,255-iters)
-    return cmap.get_color(iterations_until_escape(z_center + complex( (x/w - 0.5)*z_width, -(y/w - h/(2*w))*z_width ),iters)/120)
+        self.canvas.bind("<Button-1>", self.zoom_in_draw)
+        self.canvas.bind("<Button-3>", self.zoom_out_draw)
+        self.canvas.bind("<MouseWheel>", self.zoom_rect)
+        self.canvas.bind("<Motion>", self.redraw)
+        self.canvas.bind("<Leave>", self.redraw)
+        self.master.bind('<Configure>', self.resize)
+        # self.master.bind('<ButtonRelease-1>',self.resized_draw)
+
+        self.time_of_resize_drawing = None
+        # self.time_of_last_resize = time.time()
+        self.thread = threading.Thread(target=self.resized_draw)
+        # self.resize_event = None
+
+    def resized_draw(self):
+        while True:
+            if time.time() > self.time_of_resize_drawing:
+                break
+        print("drawing")
+
+        self.complete_width = self.master.winfo_width()
+        self.width = int(min(0.9*self.complete_width,self.complete_width-100))
+        self.height = self.master.winfo_height()
+
+        self.place(x=0,y=0,width=self.complete_width,height=self.height)
+        self.canvas.place(x=0,y=0,width=self.width, height=self.height)
+        self.control_panel.place(x=self.width,y=0,width=self.complete_width-self.width, height=self.height)
+
+        self.draw()
 
 
-def iterations_until_escape(c,iters):
-    z = c
-    for i in range(iters):
-        z = z*z + c
-        if abs(z) >= 2:
-            return i
-    return -1
+    def resize(self,event):
+        print(event)
+        if event.width != self.complete_width or event.height != self.height:
+            print("resize event")
+            self.time_of_resize_drawing = time.time() + 1
+            if not self.thread.is_alive():
+                self.thread = threading.Thread(target=self.resized_draw)
+                self.thread.start()
 
+        # self.time_of_last_resize = time.time()
+        # self.resize_event = event
 
+        # # asyncio.run(self.async_draw())
+        # if self.resize_drawing_task:
+        #     self.resize_drawing_task.cancel()
+        # self.resize_drawing_task = asyncio.create_task(self.async_draw())
+        # await self.resize_drawing_task
 
+    # def draw_after_resize(self):
+    #     print("in thread")
+    #     time.sleep(5)
+    #     if time.time()-self.time_of_last_resize >= 5 and self.to_be_configured:
+    #         print("drawing")
+    #         self.to_be_configured = False
 
-def func(x,y,w,h,z_center,z_width,iters):
-    #ignore the PEP 3118 buffer warning
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore', RuntimeWarning)
-        # w,h = 800,800
+    #         self.complete_width = self.resize_event.width
+    #         self.width = int(min(0.9*self.complete_width,self.complete_width-100))
+    #         self.height = self.resize_event.height
+    #         self.canvas.config(width=self.height, height=self.height)
+    #         self.control_panel.config(width=self.complete_width-self.width, height=self.height)
 
-        arr = numpy.frombuffer(shared.get_obj(), dtype=numpy.uint8()) # arr and shared share the same memory
-        # make it three-dimensional
-        b = arr.reshape((w,h,3)) # b and arr share the same memory
+    #         self.draw()
 
-        b[x,y] = get_color(x,y,w,h,z_center,z_width,iters)
-        # b[ (n//(h*3)) % w, (n//3) % h ] = (n,n+1,n+2)
+    def get_image(self,width=None, height=None, iterations=None):
+        if None in {width, height, iterations}:
+            width, height, iterations = self.width, self.height, self.iterations
 
-shared = None
-def _init(a):
-    global shared
-    shared = a
+        start = time.time()
+        array = self.fractal_image_getter(width, height, self.z_center, self.z_width, iterations, self.colormap, self.color_cycle_speed)
+        print(f"Took {'%.2f' % (time.time()-start)} seconds to load image. Zoomlevel: {self.get_zoom_level()}")
+       
+        return ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(array,0,1)))
 
-def get_image_array_multithreaded(iters, wid, hei):
+    def draw(self,event=None):
+        self.current_view = self.get_image()
+        self.redraw(event)
 
-    # !!! Consider partly rolling back to the last version on GitHub
+    def redraw(self,event=None):
+        self.canvas.create_image(0,0,image=self.current_view, anchor=NW)
+        if event is not None and "Leave event" not in str(event):
+            self.canvas.create_rectangle(event.x-self.rect_width/2,  event.y-self.rect_width*self.height/self.width/2, #evtl. x1 statt x0, x2 statt x1 etc
+                 event.x+self.rect_width/2,  event.y+self.rect_width*self.height/self.width/2, outline='gray',width=2)
 
-    # a = mp.Array(c.c_uint8, w*h*3)
-    # temporary = False
-    # if wid*hei*3 != len(a):
-    temp = mp.Array(c.c_uint8, wid*hei*3)
-        # temporary = True
-    pool = mp.Pool(processes=16, initializer=_init, initargs=(temp,))
-    # else:
-    #     a = mp.Array(c.c_uint8, w*h*3)
-    #     pool = mp.Pool(processes=10, initializer=_init, initargs=(a,))
+    def zoom_rect(self, event):
+        if event.delta < 0:
+            self.rect_width *= 1.15
+        else:
+            self.rect_width /= 1.15
+        self.redraw(event)
 
-    pool.starmap(func, (tup+(wid,hei,z_center,z_width,iters) for tup in itertools.product(range(wid),range(hei)) ))
-    # pool.starmap(func, zip(range(0,w*h*3,3), (w for _ in range(w*h)), (w for _ in range(w*h)), [processes]*w*h)) # seemingly worse performance
+    def zoom_out_draw(self,event):
+        x_off, y_off = event.x-self.width/2, self.height/2-event.y
+        self.z_center -= complex(real = x_off*self.z_width/self.rect_width , imag = y_off*self.z_width/self.rect_width)
+        self.z_width *= self.width/self.rect_width
+        
+        self.draw(event)
+
+    def zoom_in_draw(self,event):
+        x_off, y_off = event.x-self.width/2, self.height/2-event.y
+        self.z_center += complex(real = x_off*self.z_width/self.width , imag = y_off*self.z_width/self.width)
+        self.z_width *= self.rect_width/self.width
+        
+        self.draw(event)
+
+    def reset_view(self):
+        self.current_view = self.default_view
+        self.z_width, self.z_center, self.iterations = self.default_parameters
+        self.redraw()
+
+    def get_zoom_level(self):
+        return 1/self.z_width
+
     
-    # pool.close()
-    # if temporary:
-    return numpy.frombuffer(temp.get_obj(), dtype=numpy.uint8()).reshape((wid,hei,3))
-    # b = numpy.frombuffer(a.get_obj(), dtype=numpy.uint8()).reshape((wid,hei,3))
-    # return b
+
+
 
 
 if __name__ == '__main__':
-    w,h = 800,800
-    processes = 16
+    w,h = 600,600
 
-    # print(list(zip(range(0,w*h*3,3),[w]*w*h,[h]*w*h))
-    
-    a = mp.Array(c.c_uint8, w*h*3)
-    pool = mp.Pool(processes=processes, initializer=_init, initargs=(a,))
-    
     root = Tk()
     if (w,h)==(1920,1080):
         root.attributes("-fullscreen", True)
     else:
         root.geometry(f"{w}x{h}")
-    canvas = Canvas(root,width=w,height=h)
-    canvas.pack()
-    rect_width = 40
-    wh_ratio = w/h
 
-    z_width = 4
-    z_center = 0+0j
+    FractalFrame(root,w,h).pack()
 
-    # cmap = Colormap( [(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True)
-    # mandel = Mandelbrot(iterations=200)
-
-    sstart = time.time()
-
-    # cmap_image = numpy.array([[cmap.get_color((x+y)/h) for x in range(w)] for y in range(h)], dtype=numpy.uint8())
-    # mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-    mandelbrot = get_image_array_multithreaded(iters=iterations, wid=w, hei=h)
-
-    eend = time.time()
-    print(eend-sstart,"seconds")
-
-    # print (cmap_image)
+    # def keydown(event):
+    #     if event.char == 's':
+    #         Image.fromarray(numpy.swapaxes(get_image_array(iters=10000,wid=1920*4,hei=1080*4),0,1)).save(f"output/{z_center}_{z_width}.png", "PNG", optimize=True)
 
 
-    # PIL Images
-    # adapters for tkinter
-    # These can be used everywhere Tkinter expects an image object.
-    # tkinter.Label(root, image=im2, bd=100).grid()
-
-    default_view = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(mandelbrot,0,1)))
-    current_view = default_view
-    canvas.create_image(0,0,image=current_view, anchor=NW)
-
-    def do_painting(x,y):
-        canvas.create_image(0,0,image=current_view, anchor=NW)
-        canvas.create_rectangle(x-rect_width/2,y-rect_width/wh_ratio/2, x+rect_width/2, y+rect_width/wh_ratio/2, outline='gray',width=2)
-
-    def motion(event):
-        do_painting(event.x, event.y)
-    root.bind('<Motion>', motion)
-
-    def mouse_wheel(event):
-        global rect_width
-        if event.delta < 0:
-            rect_width *= 1.15
-        else:
-            rect_width /= 1.15
-        do_painting(event.x,event.y)
-    root.bind("<MouseWheel>", mouse_wheel)
-
-    def mouse_clicked(event):
-        global current_view, z_width, z_center
-        x_off, y_off = event.x-w/2, h/2-event.y
-        z_center += complex(x_off*z_width/w ,y_off*z_width/w)
-        z_width *= rect_width/w
-        start = time.time()
-        # new_mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-        new_mandelbrot = get_image_array_multithreaded(iters=iterations, wid=w, hei=h)
-        end = time.time()
-        print(end-start)
-        current_view = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(new_mandelbrot,0,1)))
-        do_painting(event.x,event.y)
-    root.bind("<Button-1>", mouse_clicked)
-
-    def right_mouse_clicked(event):
-        global current_view, z_width, z_center
-        x_off, y_off = event.x-w/2, h/2-event.y
-        z_center -= complex(x_off*z_width/rect_width ,y_off*z_width/rect_width)
-        z_width *= w/rect_width
-        start = time.time()
-        # new_mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-        new_mandelbrot = get_image_array_multithreaded(iters=iterations, wid=w, hei=h)
-        end = time.time()
-        print(end-start)
-        current_view = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(new_mandelbrot,0,1)))
-        do_painting(event.x,event.y)
-    root.bind("<Button-3>", right_mouse_clicked)
-
-    def on_leave(event):
-        canvas.create_image(0,0,image=current_view, anchor=NW)
-    root.bind("<Leave>", on_leave)
-
-    def keydown(event):
-        if event.char == 's':
-            Image.fromarray(numpy.swapaxes(get_image_array_multithreaded(iters=10000,wid=1920*4,hei=1080*4),0,1)).save(f"output/{z_center}_{z_width}.png", "PNG", optimize=True)
-
-
-    root.bind("<KeyPress>", keydown)
+    # root.bind("<KeyPress>", keydown)
 
     def on_closing():
-        pool.close()
         root.destroy()
     root.protocol("WM_DELETE_WINDOW", on_closing)
 

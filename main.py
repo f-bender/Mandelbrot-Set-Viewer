@@ -3,7 +3,7 @@ from PIL import Image, ImageTk
 import numpy
 from colormap import Colormap
 import time
-from mandelbrot_image_multiprocessing import get_image_array_multithreaded
+from mandelbrot_image_multiprocessing import get_image_array
 # from multiprocessing.pool import ThreadPool
 
 # threads = 8
@@ -55,7 +55,8 @@ if __name__ == '__main__':
 
     # cmap_image = numpy.array([[cmap.get_color((x+y)/h) for x in range(w)] for y in range(h)], dtype=numpy.uint8())
     # mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-    mandelbrot = get_image_array_multithreaded(w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
+    print(w,h,z_center,z_width,iterations)
+    mandelbrot = get_image_array(w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
 
     eend = time.time()
     print(eend-sstart,"seconds")
@@ -90,7 +91,7 @@ if __name__ == '__main__':
 
         start = time.time()
         # new_mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-        new_mandelbrot = get_image_array_multithreaded(w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
+        new_mandelbrot = get_image_array(w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
         print(time.time()-start)
 
         current_view = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(new_mandelbrot,0,1)))
@@ -105,7 +106,7 @@ if __name__ == '__main__':
 
         start = time.time()
         # new_mandelbrot = mandel.get_image_array(z_center,z_width,w,h)
-        new_mandelbrot = get_image_array_multithreaded(w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
+        new_mandelbrot = get_image_array(w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
         print(time.time()-start)
 
         current_view = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(new_mandelbrot,0,1)))
@@ -122,7 +123,9 @@ if __name__ == '__main__':
 
     def keydown(event):
         if event.char == 's':
+            start = time.time()
             Image.fromarray(numpy.swapaxes(get_image_array_multithreaded(3840,2160,z_center,z_width,1000,colormap,color_cycle_speed),0,1)).save(f"output/{z_center}_{z_width}.png", "PNG", optimize=True)
+            print(time.time()-start)
     root.bind("<KeyPress>", keydown)
 
     root.mainloop()

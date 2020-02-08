@@ -7,7 +7,7 @@ def iterations_until_escape(c,iterations):
     z = c
     for i in range(iterations):
         z = z*z + c
-        if abs(z) >= 2:
+        if abs(z) > 2:
             return i
     return -1
 
@@ -21,9 +21,9 @@ def _init(a):
     global shared
     shared = a
 
-def get_image_array_multithreaded(w, h,z_center,z_width,iterations,colormap,color_cycle_speed):
+def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed):
     temp = mp.RawArray(c.c_uint8, w*h*3)
-    pool = mp.Pool(processes=1, initializer=_init, initargs=(temp,))
+    pool = mp.Pool(processes=16, initializer=_init, initargs=(temp,))
 
     pool.starmap(write_pixel, (tup+(w,h,z_center,z_width,iterations,colormap,color_cycle_speed) for tup in itertools.product(range(w),range(h))) )
 
