@@ -6,8 +6,8 @@ from colormap import Colormap
 from mandelbrot_image_multiprocessing import get_image_array
 import threading
 
-
-# TODO: in KLASSE umwandeln, am besten Unterklasse von Frame (oder Panel oder sowas), mit mandelbrot-objekt und Canvas etc als Attribute (self.)
+CHAR_WIDTH = 8
+Z_CENTER_DIGITS = 22
 
 class FractalFrame(Frame):
 
@@ -17,31 +17,31 @@ class FractalFrame(Frame):
             self.fractal = master
             Label(self,text="Center:").grid(column=1,row=1)
             Label(self,text="Real Part").grid(column=1,row=2)
-            self.real = Entry(self)
+            self.real = Entry(self,width=Z_CENTER_DIGITS)
             self.real.grid(column=2,row=2,sticky='w')
             # self.real.config(wrap='none')
             Label(self,text="Imaginary Part").grid(column=1,row=3)
-            self.imag = Entry(self)
+            self.imag = Entry(self,width=Z_CENTER_DIGITS)
             self.imag.grid(column=2,row=3,sticky='w')
 
             Label(self,text="Zoomlevel").grid(column=3,row=1)
-            self.zoom = Entry(self)
+            self.zoom = Entry(self,width=10)
             self.zoom.grid(column=4,row=1,sticky='w')
 
             Label(self,text="Iterations").grid(column=3,row=2)
-            self.iters = Entry(self)
+            self.iters = Entry(self,width=10)
             self.iters.grid(column=4,row=2,sticky='w')
 
             Label(self,text="Color Cycle Speed").grid(column=3,row=3)
-            self.color_cycle_speed = Entry(self)
+            self.color_cycle_speed = Entry(self,width=10)
             self.color_cycle_speed.grid(column=4,row=3,sticky='w')
 
             self._padx = 10
             self._pady = 10
             self.configure(padx=self._padx,pady=self._pady)
 
-            self.grid_columnconfigure(2,weight=4)
-            self.grid_columnconfigure(4,weight=1)
+            # self.grid_columnconfigure(2,weight=4)
+            # self.grid_columnconfigure(4,weight=1)
 
             self.real.bind('<Return>',self.master.update_values)
             self.imag.bind('<Return>',self.master.update_values)
@@ -68,14 +68,21 @@ class FractalFrame(Frame):
             self.color_cycle_speed.insert(END,self.fractal.color_cycle_speed)
         
         def resize(self):
-            time.sleep(0.01)
-            col2_wid = self.grid_bbox(2,0,2,0)[2]//7
-            col4_wid = self.grid_bbox(4,0,4,0)[2]//7
-            self.real.config(width=col2_wid)
-            self.imag.config(width=col2_wid)
-            self.zoom.config(width=col4_wid)
-            self.iters.config(width=col4_wid)
-            self.color_cycle_speed.config(width=col4_wid)
+            # time.sleep(0.01)
+            self.real.config(width=Z_CENTER_DIGITS)
+            self.imag.config(width=Z_CENTER_DIGITS)
+            self.zoom.config(width=10)
+            self.iters.config(width=10)
+            self.color_cycle_speed.config(width=10)
+            if self.grid_bbox()[2] > self.winfo_width():
+                print("too small")
+                rest_width = self.winfo_width() - self.grid_bbox(1,0,1,0)[2] - self.grid_bbox(3,0,3,0)[2]
+                entry_width = int(rest_width/2/CHAR_WIDTH)
+                self.real.config(width=entry_width)
+                self.imag.config(width=entry_width)
+                self.zoom.config(width=entry_width)
+                self.iters.config(width=entry_width)
+                self.color_cycle_speed.config(width=entry_width)
 
 
         def get_values(self):
@@ -91,9 +98,13 @@ class FractalFrame(Frame):
 
 
     def __init__(self,master=None,width=1000, height=1000, iterations=200, color_cycle_speed=5, zoom_level=0.25, z_center=0+0j,
-                colormap=Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True) ):
-        assert width >= 200 and height >= 100 , "Minimum dimensions are 200x100"
+                colormap=Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True), processes=None ):
+        assert width >= 300 and height >= 200 , "Minimum dimensions are 300x200"
         super().__init__(master)
+        if processes is None:
+            self.processes = 16
+        else:
+            self.processes = processes
         self.master = master
         self.fractal_image_getter = get_image_array
         self.complete_height = height
@@ -143,18 +154,23 @@ class FractalFrame(Frame):
             if time.time() > self.time_of_resize_drawing:
                 break
 
-        self.complete_height = self.master.winfo_height()
-        # self.height = int(min(0.9*self.complete_height,self.complete_height-100))
-        self.height = self.complete_height-self.control_panel.get_required_height()
-        self.width = self.master.winfo_width()
+        while True: # emulated do while (do ... while self.resize_again)
+            self.complete_height = self.master.winfo_height()
+            # self.height = int(min(0.9*self.complete_height,self.complete_height-100))
+            self.height = self.complete_height-self.control_panel.get_required_height()
+            self.width = self.master.winfo_width()
 
-        self.place(x=0,y=0,width=self.width,height=self.complete_height)
-        self.canvas.place(x=0,y=0,width=self.width, height=self.height)
-        self.control_panel.place(x=0, width=self.width, y=self.height, height=self.control_panel.get_required_height())
+            self.place(x=0,y=0,width=self.width,height=self.complete_height)
+            self.canvas.place(x=0,y=0,width=self.width, height=self.height)
+            self.control_panel.place(x=0, width=self.width, y=self.height, height=self.control_panel.get_required_height())
 
-        self.control_panel.resize()
+            self.control_panel.resize()
 
-        self.draw()
+            self.resize_again = False
+            self.draw()
+
+            if not self.resize_again:
+                break
 
     def resize(self,event):
         if event.width != self.width or event.height != self.complete_height:
@@ -162,14 +178,16 @@ class FractalFrame(Frame):
             if not self.thread.is_alive():
                 self.thread = threading.Thread(target=self.resized_draw)
                 self.thread.start()
+            else:
+                self.resize_again = True
 
     def get_image(self,width=None, height=None, iterations=None):
         if None in {width, height, iterations}:
             width, height, iterations = self.width, self.height, self.iterations
 
         start = time.time()
-        array = self.fractal_image_getter(width, height, self.z_center, self.z_width, iterations, self.colormap, self.color_cycle_speed)
-        print(f"Took {'%.2f' % (time.time()-start)} seconds to load image. Zoomlevel: {self.get_zoom_level()}")
+        array = self.fractal_image_getter(width, height, self.z_center, self.z_width, iterations, self.colormap, self.color_cycle_speed, self.processes)
+        print(f"Took {'%.2f' % (time.time()-start)} seconds to load image.")
        
         return ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(array,0,1)))
 
@@ -208,7 +226,7 @@ class FractalFrame(Frame):
             self.rect_width *= 1.15
         else:
             self.rect_width /= 1.15
-        print(self.rect_width)
+        # print(self.rect_width)
         self.new_rectangle(event)
 
     def zoom_out_draw(self,event):
@@ -235,10 +253,25 @@ class FractalFrame(Frame):
     
 
 
+import sys
+from multiprocessing import freeze_support
 
 
 if __name__ == '__main__':
-    w,h = 600,600
+
+    # this is VITAL when creating an .exe file:
+    freeze_support()
+    # without it, __main__ will get called upon every creation of a new multiprocessing process
+    # source: https://stackoverflow.com/a/27694505
+
+    processes,w,h = None,600,600
+
+    try:
+        processes = int(sys.argv[1])
+        w = int(sys.argv[2])
+        h = int(sys.argv[3])
+    except:
+        pass
 
     root = Tk()
     if (w,h)==(1920,1080):
@@ -246,7 +279,7 @@ if __name__ == '__main__':
     else:
         root.geometry(f"{w}x{h}")
 
-    FractalFrame(root,w,h).pack()
+    FractalFrame(root,w,h,processes=processes).pack()
 
     # def keydown(event):
     #     if event.char == 's':

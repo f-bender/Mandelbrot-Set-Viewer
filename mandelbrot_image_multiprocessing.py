@@ -1,4 +1,4 @@
-import multiprocessing as mp
+from multiprocessing import Pool, RawArray
 import ctypes as c
 import itertools
 import numpy
@@ -21,9 +21,10 @@ def _init(a):
     global shared
     shared = a
 
-def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed):
-    temp = mp.RawArray(c.c_uint8, w*h*3)
-    pool = mp.Pool(processes=16, initializer=_init, initargs=(temp,))
+def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes):
+    temp = RawArray(c.c_uint8, w*h*3)
+    print(processes)
+    pool = Pool(processes=processes, initializer=_init, initargs=(temp,))
 
     pool.starmap(write_pixel, (tup+(w,h,z_center,z_width,iterations,colormap,color_cycle_speed) for tup in itertools.product(range(w),range(h))) )
 
