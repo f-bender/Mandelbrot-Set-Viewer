@@ -10,9 +10,13 @@ class Colormap:
         if cyclic and nodes[-1] != nodes[0]:
             self.nodes.append(nodes[0])
 
+    def reverse(self):
+        self.nodes = self.nodes[::-1]
+        return self
+
     def get_color(self,map_value):
         if map_value < 0:
-            return (0,0,0)
+            return (1,1,1)
         if not self.cyclic and (map_value > 1 or map_value < 0):
             raise ValueError("map_value parameter of get_color function has to be between 0 and 1 for a non-cyclic Colormap")
         map_value = map_value % 1
@@ -23,6 +27,11 @@ class Colormap:
         # just adding scaled versions of both neighboring nodes
         return tuple(map(sum,zip( tuple(x*(1-dist_in_section_normalized) for x in self.nodes[int(section_nr)]) , tuple(x*dist_in_section_normalized for x in self.nodes[int(section_nr)+1]) )))
 
+    def __eq__(self, other):
+        if isinstance(other, self.__class__):
+            return self.nodes == other.nodes and self.cyclic == other.cyclic
+        else:
+            return False
 
 # seemingly unsuccessful attempt at making a colormap with a more performant get_color() method
 

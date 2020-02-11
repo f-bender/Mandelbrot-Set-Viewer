@@ -3,7 +3,7 @@ from PIL import Image, ImageTk
 import numpy
 import time
 from colormap import Colormap
-from mandelbrot_image_multiprocessing import get_image_array
+import mandelbrot_image_multiprocessing as image_creator
 import threading
 
 CHAR_WIDTH = 8
@@ -75,7 +75,6 @@ class FractalFrame(Frame):
             self.iters.config(width=10)
             self.color_cycle_speed.config(width=10)
             if self.grid_bbox()[2] > self.winfo_width():
-                print("too small")
                 rest_width = self.winfo_width() - self.grid_bbox(1,0,1,0)[2] - self.grid_bbox(3,0,3,0)[2]
                 entry_width = int(rest_width/2/CHAR_WIDTH)
                 self.real.config(width=entry_width)
@@ -106,7 +105,7 @@ class FractalFrame(Frame):
         else:
             self.processes = processes
         self.master = master
-        self.fractal_image_getter = get_image_array
+        # self.fractal_image_getter = get_image_array
         self.complete_height = height
         # height of the image (the Frame without the control panel)
         self.height = int(min(0.9*self.complete_height,self.complete_height-100))
@@ -125,6 +124,8 @@ class FractalFrame(Frame):
         self.control_panel = self.ControlPanel(self)
         self.control_panel.place(x=0, width=self.width, y=self.height, height=self.complete_height-self.height)
 
+        self.image = None
+        self.cropped = None
         
 
         self.default_parameters = (self.z_width, self.z_center, self.iterations)
@@ -140,21 +141,28 @@ class FractalFrame(Frame):
         self.canvas.bind("<Leave>", self.new_rectangle)
         self.master.bind('<Configure>', self.resize)
 
-        self.time_of_resize_drawing = None
+        self.time_of_resize_drawing = time.time()
         # self.time_of_last_resize = time.time()
-        self.thread = threading.Thread(target=self.resized_draw)
+        self.resize_thread = threading.Thread(target=self.resized_draw,args=(True,))
+        self.refresh_thread = None
         # self.resize_event = None
+        self.resize_thread.start()
 
     def update_values(self,event):
+        same_pos = False
+        if self.z_center == self.control_panel.get_values()[0] and self.control_panel.get_values()[1] == 1/float('%.4g' % self.get_zoom_level()):
+            same_pos = True
         self.z_center, self.z_width, self.iterations, self.color_cycle_speed = self.control_panel.get_values()
-        self.draw()
+        self.draw(same_pos=same_pos)
 
-    def resized_draw(self):
-        while True:
-            if time.time() > self.time_of_resize_drawing:
-                break
+    def resized_draw(self,init=False):
+        if not init:
+            while True:
+                if time.time() > self.time_of_resize_drawing and (self.refresh_thread is None or not self.refresh_thread.is_alive()):
+                    break
 
-        while True: # emulated do while (do ... while self.resize_again)
+        if self.complete_height != self.master.winfo_height() or self.width != self.master.winfo_width() or init:
+            # while True: # emulated do while (do ... while self.resize_again)
             self.complete_height = self.master.winfo_height()
             # self.height = int(min(0.9*self.complete_height,self.complete_height-100))
             self.height = self.complete_height-self.control_panel.get_required_height()
@@ -166,40 +174,94 @@ class FractalFrame(Frame):
 
             self.control_panel.resize()
 
-            self.resize_again = False
+            # self.resize_again = False
             self.draw()
 
-            if not self.resize_again:
-                break
+            # if not self.resize_again:
+            #     break
 
     def resize(self,event):
         if event.width != self.width or event.height != self.complete_height:
             self.time_of_resize_drawing = time.time() + 1
-            if not self.thread.is_alive():
-                self.thread = threading.Thread(target=self.resized_draw)
-                self.thread.start()
-            else:
-                self.resize_again = True
+            if not self.resize_thread.is_alive():
+                self.resize_thread = threading.Thread(target=self.resized_draw)
+                self.resize_thread.start()
 
-    def get_image(self,width=None, height=None, iterations=None):
-        if None in {width, height, iterations}:
-            width, height, iterations = self.width, self.height, self.iterations
 
-        start = time.time()
-        array = self.fractal_image_getter(width, height, self.z_center, self.z_width, iterations, self.colormap, self.color_cycle_speed, self.processes)
-        print(f"Took {'%.2f' % (time.time()-start)} seconds to load image.")
+    # def get_image(self,width=None, height=None, iterations=None):
+    #     if None in {width, height, iterations}:
+    #         width, height, iterations = self.width, self.height, self.iterations
+
+    #     start = time.time()
+    #     array = image_creator.get_image_array(width, height, self.z_center, self.z_width, iterations, self.colormap, self.color_cycle_speed, self.processes)
+    #     self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1)))
+    #     self.refresh_thread.start()
+    #     # print(f"Took {'%.2f' % (time.time()-start)} seconds to load image.")
        
-        return ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(array,0,1)))
+    #     return ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(array,0,1)))
 
-    def draw(self,event=None):
+    def draw(self,event=None,width=None, height=None, iterations=None, same_pos=False):
+        if self.refresh_thread is None or not self.refresh_thread.is_alive():
+            if None in {width, height, iterations}:
+                width, height, iterations = self.width, self.height, self.iterations
+
+            start = time.time()
+            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed, self.processes)
+            self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos))
+            self.refresh_thread.start()
+
+        # old_view = self.current_view
+        # self.image = self.get_image()
+        # self.current_view = self.canvas.create_image(0,0,image=self.image, anchor=NW)
+        # self.canvas.tag_raise(self.rectangle)
+        # self.control_panel.update_values()
+        # if old_view is not None:
+        #     self.canvas.delete(old_view)
+        # self.new_rectangle(event)
+
+    # TODO: when zooming out, show the old image resized into the current rectangle, the rest of the frame black
+    # also, make the image_creator not calculate those pixels since they are already known
+    def redraw(self,start,array,event, same_pos=False):
+        if self.image is not None and event is not None:
+            self.cropped = self.image.crop(self.get_rect_coords(event)).resize((self.width, self.height),Image.NEAREST)
+        elif same_pos:
+            self.cropped = self.image
+        else:
+            self.cropped = None
+
+        delay = array.shape[0]*array.shape[1] / 1_000_000
+        while not image_creator.is_done():
+            time.sleep(delay)
+            old_view = self.current_view
+
+            # t = time.time()
+
+            self.image = Image.fromarray(array)
+            if self.cropped is not None:
+                # mask = Image.fromarray(numpy.where(numpy.all(array==0, axis=2),0,1), mode='1') # unsuccessful attempt
+                mask = self.image.convert('L')              # make it grayscale
+                mask = mask.point(lambda p: p > 0 and 255)  # make all pixels with values above 0 white
+                self.image = Image.composite(self.image, self.cropped, mask)
+                # self.image = mask
+
+            self.photo_image = ImageTk.PhotoImage(self.image)
+            self.current_view = self.canvas.create_image(0,0,image=self.photo_image, anchor=NW)
+            if old_view is not None:
+                    self.canvas.delete(old_view) 
+            self.canvas.tag_raise(self.rectangle)
+
+            # print(f"Took {'%.5f' % (time.time()-t)} for cycle") 
+
         old_view = self.current_view
-        self.image = self.get_image()
-        self.current_view = self.canvas.create_image(0,0,image=self.image, anchor=NW)
-        self.canvas.tag_raise(self.rectangle)
-        self.control_panel.update_values()
+        self.image = Image.fromarray(array)
+        self.photo_image = ImageTk.PhotoImage(self.image)
+        self.current_view = self.canvas.create_image(0,0,image=self.photo_image, anchor=NW)
         if old_view is not None:
-            self.canvas.delete(old_view)
-        self.new_rectangle(event)
+                self.canvas.delete(old_view) 
+        self.canvas.tag_raise(self.rectangle)
+
+        print(f"Took {'%.2f' % (time.time()-start)} seconds to load image.")
+
 
     # def redraw(self,event=None):
     #     # self.view = self.canvas.create_image(0,0,image=self.current_view, anchor=NW)
@@ -213,12 +275,16 @@ class FractalFrame(Frame):
     def new_rectangle(self,event):
         self.canvas.delete(self.rectangle)
         if event is not None and "Leave event" not in str(event):
-            self.rectangle = self.canvas.create_rectangle(event.x-self.rect_width/2,  event.y-self.rect_width*self.height/self.width/2,
-                                event.x+self.rect_width/2,  event.y+self.rect_width*self.height/self.width/2, outline='gray',width=2)
+            coords = self.get_rect_coords(event)
+            self.rectangle = self.canvas.create_rectangle(coords[0],coords[1],coords[2],coords[3], outline='gray',width=2)
 
             # why this is necessary: https://stackoverflow.com/questions/46060570/tkinter-the-shape-isnt-uniform-and-the-animation-looks-bad
             # especially https://stackoverflow.com/a/54954035 explains it well
-            self.canvas.configure(bg="grey")
+            self.canvas.configure(bg="black")
+
+    def get_rect_coords(self, event):
+        return (event.x-self.rect_width/2,  event.y-self.rect_width*self.height/self.width/2,
+                event.x+self.rect_width/2,  event.y+self.rect_width*self.height/self.width/2)
 
 
     def zoom_rect(self, event):
@@ -233,6 +299,7 @@ class FractalFrame(Frame):
         x_off, y_off = event.x-self.width/2, self.height/2-event.y
         self.z_center -= complex(real = x_off*self.z_width/self.rect_width , imag = y_off*self.z_width/self.rect_width)
         self.z_width *= self.width/self.rect_width
+        self.control_panel.update_values()
         
         self.draw(event)
 
@@ -240,6 +307,7 @@ class FractalFrame(Frame):
         x_off, y_off = event.x-self.width/2, self.height/2-event.y
         self.z_center += complex(real = x_off*self.z_width/self.width , imag = y_off*self.z_width/self.width)
         self.z_width *= self.rect_width/self.width
+        self.control_panel.update_values()
         
         self.draw(event)
 
