@@ -97,13 +97,14 @@ class FractalFrame(Frame):
 
 
     def __init__(self,master=None,width=1000, height=1000, iterations=200, color_cycle_speed=5, zoom_level=0.25, z_center=0+0j,
-                colormap=Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True), processes=None ):
+                colormap=Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True), processes=None, fluid_animation=False):
         assert width >= 300 and height >= 200 , "Minimum dimensions are 300x200"
         super().__init__(master)
         if processes is None:
             self.processes = 16
         else:
             self.processes = processes
+        self.fluid_animation = fluid_animation
         self.master = master
         # self.fractal_image_getter = get_image_array
         self.complete_height = height
@@ -149,11 +150,12 @@ class FractalFrame(Frame):
         self.resize_thread.start()
 
     def update_values(self,event):
-        same_pos = False
-        if self.z_center == self.control_panel.get_values()[0] and self.control_panel.get_values()[1] == 1/float('%.4g' % self.get_zoom_level()):
-            same_pos = True
-        self.z_center, self.z_width, self.iterations, self.color_cycle_speed = self.control_panel.get_values()
-        self.draw(same_pos=same_pos)
+        if self.refresh_thread is None or not self.refresh_thread.is_alive():
+            same_pos = False
+            if self.z_center == self.control_panel.get_values()[0] and self.control_panel.get_values()[1] == 1/float('%.4g' % self.get_zoom_level()):
+                same_pos = True
+            self.z_center, self.z_width, self.iterations, self.color_cycle_speed = self.control_panel.get_values()
+            self.draw(same_pos=same_pos)
 
     def resized_draw(self,init=False):
         if not init:
@@ -200,14 +202,15 @@ class FractalFrame(Frame):
        
     #     return ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(array,0,1)))
 
-    def draw(self,event=None,width=None, height=None, iterations=None, same_pos=False):
+    def draw(self,event=None,width=None, height=None, iterations=None, same_pos=False, out=False):
         if self.refresh_thread is None or not self.refresh_thread.is_alive():
             if None in {width, height, iterations}:
                 width, height, iterations = self.width, self.height, self.iterations
 
             start = time.time()
             array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed, self.processes)
-            self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos))
+            # TODO: do this with an async Coroutine (something like JS's setInterval() instead of time.sleep()?) to prevent flickering!
+            self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos, out))
             self.refresh_thread.start()
 
         # old_view = self.current_view
@@ -219,18 +222,28 @@ class FractalFrame(Frame):
         #     self.canvas.delete(old_view)
         # self.new_rectangle(event)
 
-    # TODO: when zooming out, show the old image resized into the current rectangle, the rest of the frame black
-    # also, make the image_creator not calculate those pixels since they are already known
-    def redraw(self,start,array,event, same_pos=False):
-        if self.image is not None and event is not None:
-            self.cropped = self.image.crop(self.get_rect_coords(event)).resize((self.width, self.height),Image.NEAREST)
-        elif same_pos:
+    # TODO: make the image_creator not calculate those pixels since they are already known?
+    # problem: then I don't know the iterations for that area which means i can not easily change the colors
+    def redraw(self,start,array,event, same_pos=False, out=False):
+        if same_pos: 
             self.cropped = self.image
+        elif self.image is not None and event is not None:
+            if out:
+                # TODO: make the image_creator not calculate those pixels since they are already known
+                self.cropped = Image.new('RGB', (self.width, self.height))
+                # NOTE: try without copy()
+                self.cropped.paste(self.image.resize((round(self.rect_width),round(self.rect_width*self.height/self.width))), box=(round(self.get_rect_coords(event)[0]),round(self.get_rect_coords(event)[1])))
+            else:
+                self.cropped = self.image.crop(self.get_rect_coords(event)).resize((self.width, self.height),Image.NEAREST)
         else:
             self.cropped = None
 
-        delay = array.shape[0]*array.shape[1] / 1_000_000
+        if self.fluid_animation:
+            delay = 0.05
+        else:
+            delay = min(array.shape[0]*array.shape[1] / 500_000, 4)
         while not image_creator.is_done():
+            # NOTE:evtl besser so etwas wie clock.tick(), zumindest für fluid_animation
             time.sleep(delay)
             old_view = self.current_view
 
@@ -299,14 +312,16 @@ class FractalFrame(Frame):
         x_off, y_off = event.x-self.width/2, self.height/2-event.y
         self.z_center -= complex(real = x_off*self.z_width/self.rect_width , imag = y_off*self.z_width/self.rect_width)
         self.z_width *= self.width/self.rect_width
+        self.iterations, self.color_cycle_speed = self.control_panel.get_values()[2:4]
         self.control_panel.update_values()
         
-        self.draw(event)
+        self.draw(event, out=True)
 
     def zoom_in_draw(self,event):
         x_off, y_off = event.x-self.width/2, self.height/2-event.y
         self.z_center += complex(real = x_off*self.z_width/self.width , imag = y_off*self.z_width/self.width)
         self.z_width *= self.rect_width/self.width
+        self.iterations, self.color_cycle_speed = self.control_panel.get_values()[2:4]
         self.control_panel.update_values()
         
         self.draw(event)
