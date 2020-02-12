@@ -170,6 +170,7 @@ class FractalFrame(Frame):
             # self.height = int(min(0.9*self.complete_height,self.complete_height-100))
             self.height = self.complete_height-self.control_panel.get_required_height()
             self.width = self.master.winfo_width()
+            self.rect_width = min(self.rect_width, self.width)
 
             self.place(x=0,y=0,width=self.width,height=self.complete_height)
             self.canvas.place(x=0,y=0,width=self.width, height=self.height)
@@ -233,8 +234,9 @@ class FractalFrame(Frame):
         elif self.image is not None and event is not None:
             if out:
                 # TODO: make the image_creator not calculate those pixels since they are already known
-                self.cropped = Image.new('RGB', (self.width, self.height))
-                self.cropped.paste(self.image.resize((ceil(self.rect_width),ceil(self.rect_width*self.height/self.width)),Image.NEAREST), box=(round(self.get_rect_coords(event)[0]),round(self.get_rect_coords(event)[1])))
+                self.cropped = Image.new('RGB', (self.width, self.height))                                      
+                                                                    #this "+1" is a hack to get the black line to disappear when rightclicking while rect_width == width
+                self.cropped.paste(self.image.resize((ceil(self.rect_width)+1,ceil(self.rect_width*self.height/self.width)),Image.NEAREST), box=(ceil(self.get_rect_coords(event)[0]),ceil(self.get_rect_coords(event)[1])))
             else:
                 self.cropped = self.image.crop(self.get_rect_coords(event)).resize((self.width, self.height),Image.NEAREST)
         else:
@@ -310,9 +312,9 @@ class FractalFrame(Frame):
 
     def zoom_rect(self, event):
         if event.delta < 0:
-            self.rect_width *= 1.15
+            self.rect_width = min(self.rect_width*1.15, self.width)
         else:
-            self.rect_width /= 1.15
+            self.rect_width = max(self.rect_width/1.15, 3)
         # print(self.rect_width)
         self.new_rectangle(event)
 
