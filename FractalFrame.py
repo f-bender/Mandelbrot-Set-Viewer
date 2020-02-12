@@ -5,6 +5,7 @@ import time
 from colormap import Colormap
 import mandelbrot_image_multiprocessing as image_creator
 import threading
+from math import ceil
 
 CHAR_WIDTH = 8
 Z_CENTER_DIGITS = 22
@@ -202,15 +203,17 @@ class FractalFrame(Frame):
        
     #     return ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(array,0,1)))
 
-    def draw(self,event=None,width=None, height=None, iterations=None, same_pos=False, out=False):
+    def draw(self,event=None,width=None, height=None, iterations=None, same_pos=False, out=False, colors_changed=False):
         if self.refresh_thread is None or not self.refresh_thread.is_alive():
             if None in {width, height, iterations}:
                 width, height, iterations = self.width, self.height, self.iterations
 
+            zoom_out_box = self.get_rect_coords(event) if out and not colors_changed else None
+
             start = time.time()
-            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed, self.processes)
+            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed, self.processes, zoom_out_box)
             # TODO: do this with an async Coroutine (something like JS's setInterval() instead of time.sleep()?) to prevent flickering!
-            self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos, out))
+            self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos, out, colors_changed))
             self.refresh_thread.start()
 
         # old_view = self.current_view
@@ -224,15 +227,14 @@ class FractalFrame(Frame):
 
     # TODO: make the image_creator not calculate those pixels since they are already known?
     # problem: then I don't know the iterations for that area which means i can not easily change the colors
-    def redraw(self,start,array,event, same_pos=False, out=False):
+    def redraw(self,start,array,event, same_pos=False, out=False, colors_changed=False):
         if same_pos: 
             self.cropped = self.image
         elif self.image is not None and event is not None:
             if out:
                 # TODO: make the image_creator not calculate those pixels since they are already known
                 self.cropped = Image.new('RGB', (self.width, self.height))
-                # NOTE: try without copy()
-                self.cropped.paste(self.image.resize((round(self.rect_width),round(self.rect_width*self.height/self.width))), box=(round(self.get_rect_coords(event)[0]),round(self.get_rect_coords(event)[1])))
+                self.cropped.paste(self.image.resize((ceil(self.rect_width),ceil(self.rect_width*self.height/self.width)),Image.NEAREST), box=(round(self.get_rect_coords(event)[0]),round(self.get_rect_coords(event)[1])))
             else:
                 self.cropped = self.image.crop(self.get_rect_coords(event)).resize((self.width, self.height),Image.NEAREST)
         else:
@@ -267,6 +269,12 @@ class FractalFrame(Frame):
 
         old_view = self.current_view
         self.image = Image.fromarray(array)
+        if out and not colors_changed:
+            assert self.cropped is not None, "cropped is None while zooming out!"
+            mask = self.image.convert('L')              # make it grayscale
+            mask = mask.point(lambda p: p > 0 and 255)  # make all pixels with values above 0 white
+            self.image = Image.composite(self.image, self.cropped, mask)
+
         self.photo_image = ImageTk.PhotoImage(self.image)
         self.current_view = self.canvas.create_image(0,0,image=self.photo_image, anchor=NW)
         if old_view is not None:
@@ -312,10 +320,11 @@ class FractalFrame(Frame):
         x_off, y_off = event.x-self.width/2, self.height/2-event.y
         self.z_center -= complex(real = x_off*self.z_width/self.rect_width , imag = y_off*self.z_width/self.rect_width)
         self.z_width *= self.width/self.rect_width
+        changed = (self.iterations, self.color_cycle_speed) != self.control_panel.get_values()[2:4]
         self.iterations, self.color_cycle_speed = self.control_panel.get_values()[2:4]
         self.control_panel.update_values()
         
-        self.draw(event, out=True)
+        self.draw(event, out=True, colors_changed=changed)
 
     def zoom_in_draw(self,event):
         x_off, y_off = event.x-self.width/2, self.height/2-event.y

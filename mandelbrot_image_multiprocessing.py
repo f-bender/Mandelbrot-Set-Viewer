@@ -16,12 +16,14 @@ def write_pixel_new_iters(x,y,w,h,z_center,z_width,iterations,colormap,color_cyc
     b = arr.reshape((w,h,3)) # b and arr share the same memory
     b[x,y] = colormap.get_color(actual_iterations*color_cycle_speed/600)
 
-def write_pixel_existing_iters(x,y,w,h,colormap,color_cycle_speed):
+def write_pixel_existing_iters(x,y,w,h,z_center,z_width,iterations,colormap,color_cycle_speed, in_ignored_box):
     iters_np = numpy.frombuffer(shared_iters, dtype=numpy.int32).reshape((w,h))
+
+    iters = iterations_until_escape(z_center + complex( (x/w - 0.5)*z_width, -(y/w - h/(2*w))*z_width ),iterations) if in_ignored_box else iters_np[x,y]
     
     arr = numpy.frombuffer(shared_colors, dtype=numpy.uint8) # arr and shared_colors share the same memory
     b = arr.reshape((w,h,3)) # b and arr share the same memory
-    b[x,y] = colormap.get_color(iters_np[x,y]*color_cycle_speed/600)
+    b[x,y] = colormap.get_color(iters*color_cycle_speed/600)
 
 
 def iterations_until_escape(c,iterations):
@@ -70,9 +72,10 @@ def is_done():
 
 last_parameters = tuple()
 thread = None
+ignored_box = None
 
-def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes):
-    global last_parameters, thread, shared_colors, shared_iters
+def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes, zoom_out_box=None):
+    global last_parameters, thread, shared_colors, shared_iters, ignored_box
 
     if last_parameters and last_parameters[:5] == (w,h,z_center,z_width,iterations):
         last_parameters = (w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
@@ -80,7 +83,7 @@ def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed,
 
         # colors = RawArray(c.c_uint8, w*h*3)
 
-        thread = threading.Thread(target=colors_from_iters, args=(shared_colors,shared_iters,   w, h,colormap,color_cycle_speed, processes))
+        thread = threading.Thread(target=colors_from_iters, args=(shared_colors,shared_iters,   w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes, ignored_box))
         thread.start()
 
         return numpy.frombuffer(shared_colors, dtype=numpy.uint8).reshape((w,h,3))
@@ -93,7 +96,7 @@ def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed,
         last_parameters = (w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
         # bei schwarzen neu iterieren, farbige einfach so lassen!
         
-        thread = threading.Thread(target=update_iters, args=(shared_colors,shared_iters,   w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes))
+        thread = threading.Thread(target=update_iters, args=(shared_colors,shared_iters,   w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes, ignored_box))
         thread.start()
 
         return numpy.frombuffer(shared_colors, dtype=numpy.uint8).reshape((w,h,3))
@@ -104,9 +107,10 @@ def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed,
             
     else:
         last_parameters = (w,h,z_center,z_width,iterations,colormap,color_cycle_speed)
+        ignored_box = zoom_out_box
         # global thread
         colors, iters = RawArray(c.c_uint8, w*h*3), RawArray(c.c_int32, w*h)
-        thread = threading.Thread(target=fill_arrays, args=(colors, iters,  w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes))
+        thread = threading.Thread(target=fill_arrays, args=(colors, iters,  w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes, zoom_out_box))
         thread.start()
 
         shared_colors, shared_iters = colors, iters
@@ -114,10 +118,10 @@ def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed,
         return numpy.frombuffer(colors, dtype=numpy.uint8).reshape((w,h,3))
 
 
-def fill_arrays(color_array, iter_array,   w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes):
+def fill_arrays(color_array, iter_array,   w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes, ignored_box):
     pool = Pool(processes=processes, initializer=_init, initargs=(color_array,iter_array))
 
-    args = [tup+(w,h,z_center,z_width,iterations,colormap,color_cycle_speed) for tup in itertools.product(range(w),range(h))]
+    args = [tup+(w,h,z_center,z_width,iterations,colormap,color_cycle_speed) for tup in itertools.product(range(w),range(h)) if not is_inside(tup[0],tup[1],ignored_box)]
     shuffle(args)
     pool.starmap(write_pixel, args)
 
@@ -125,21 +129,26 @@ def fill_arrays(color_array, iter_array,   w, h,z_center,z_width,iterations,colo
 
     # return numpy.frombuffer(color_array, dtype=numpy.uint8).reshape((w,h,3))
 
-def colors_from_iters(color_array, iter_array,   w, h,colormap,color_cycle_speed, processes):
+def colors_from_iters(color_array, iter_array,   w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes, ignored_box):
     pool = Pool(processes=processes, initializer=_init, initargs=(color_array,iter_array))
 
-    args = [tup+(w,h,colormap,color_cycle_speed) for tup in itertools.product(range(w),range(h))]
+    args = [tup+(w,h,z_center,z_width,iterations,colormap,color_cycle_speed,is_inside(tup[0],tup[1],ignored_box)) for tup in itertools.product(range(w),range(h))]
     shuffle(args)
     pool.starmap(write_pixel_existing_iters , args)
 
     pool.close()
 
-def update_iters(color_array, iter_array,   w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes):
+def update_iters(color_array, iter_array,   w, h,z_center,z_width,iterations,colormap,color_cycle_speed, processes, ignored_box):
     pool = Pool(processes=processes, initializer=_init, initargs=(color_array,iter_array))
     iters_np = numpy.frombuffer(shared_iters, dtype=numpy.int32).reshape((w,h))
 
-    args = [tup+(w,h,z_center,z_width,iterations,colormap,color_cycle_speed) for tup in itertools.product(range(w),range(h)) if iters_np[tup[0],tup[1]] == -1]
+    args = [tup+(w,h,z_center,z_width,iterations,colormap,color_cycle_speed) for tup in itertools.product(range(w),range(h)) if iters_np[tup[0],tup[1]] == -1 or is_inside(tup[0],tup[1],ignored_box)]
     shuffle(args)
-    pool.starmap(write_pixel_new_iters , args)
+    pool.starmap(write_pixel_new_iters, args)
 
     pool.close()
+
+def is_inside(x,y,box):
+    if box is None:
+        return False
+    return x >= box[0] and y >= box[1] and x <= box[2] and y <= box[3]
