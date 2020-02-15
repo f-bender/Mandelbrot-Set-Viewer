@@ -3,7 +3,7 @@ from PIL import Image, ImageTk
 import numpy
 import time
 from colormap import Colormap
-import mandelbrot_image_multiprocessing as image_creator
+import mandelbrot_image_cuda as image_creator
 import threading
 from math import ceil
 
@@ -102,7 +102,7 @@ class FractalFrame(Frame):
         assert width >= 300 and height >= 200 , "Minimum dimensions are 300x200"
         super().__init__(master)
         if processes is None:
-            self.processes = 16
+            self.processes = 1
         else:
             self.processes = processes
         self.fluid_animation = fluid_animation
@@ -212,10 +212,22 @@ class FractalFrame(Frame):
             zoom_out_box = self.get_rect_coords(event) if out and not colors_changed else None
 
             start = time.time()
-            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed, self.processes, zoom_out_box)
+            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed)#, self.processes, zoom_out_box)
             # TODO: do this with an async Coroutine (something like JS's setInterval() instead of time.sleep()?) to prevent flickering!
-            self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos, out, colors_changed))
-            self.refresh_thread.start()
+            # self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos, out, colors_changed))
+            # self.refresh_thread.start() # <- without cuda
+            
+            # <cuda stuff>
+            print(time.time()-start,"seconds")
+            old_view = self.current_view
+            self.image = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(array,0,1),mode='HSV'))
+            self.current_view = self.canvas.create_image(0,0,image=self.image, anchor=NW)
+            if old_view is not None:
+                    self.canvas.delete(old_view) 
+            self.canvas.tag_raise(self.rectangle)
+            # </cuda stuff>
+
+
 
         # old_view = self.current_view
         # self.image = self.get_image()
@@ -282,8 +294,10 @@ class FractalFrame(Frame):
         if old_view is not None:
                 self.canvas.delete(old_view) 
         self.canvas.tag_raise(self.rectangle)
-
-        print(f"Took {'%.2f' % (time.time()-start)} seconds to load image.")
+        
+        es = "es"
+        s = ""
+        print(f"Took {'%.2f' % (time.time()-start)} seconds to load image. ({self.processes} process{es if self.processes > 1 else s})")
 
 
     # def redraw(self,event=None):

@@ -31,6 +31,22 @@ from mandelbrot_image_multiprocessing import get_image_array
 
 
 if __name__ == '__main__':
+
+    arr=numpy.zeros([5,6,3])
+    arr.swapaxes(0,1)[:] = [[1,1,1],[2,2,2],[3,3,3],[4,4,4],[5,5,5]]
+    print(arr)
+    # arr.T[:] = [1,2,3,4,5]
+    # print(arr)
+    ful = numpy.empty([5,6,3])
+    ful[:] = [0,1,2]
+    print(ful)
+
+
+
+
+
+    exit(0)
+
     w,h = 1920,1080
     root = Tk()
     if (w,h) == (1920,1080):
