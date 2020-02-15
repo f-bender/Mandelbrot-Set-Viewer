@@ -5,7 +5,7 @@ import time
 from colormap import Colormap
 import mandelbrot_image_cuda as image_creator
 import threading
-from math import ceil
+from math import ceil, log
 
 CHAR_WIDTH = 8
 Z_CENTER_DIGITS = 22
@@ -127,6 +127,7 @@ class FractalFrame(Frame):
         self.control_panel.place(x=0, width=self.width, y=self.height, height=self.complete_height-self.height)
 
         self.image = None
+        self.photo_image = None
         self.cropped = None
         
 
@@ -143,12 +144,36 @@ class FractalFrame(Frame):
         self.canvas.bind("<Leave>", self.new_rectangle)
         self.master.bind('<Configure>', self.resize)
 
+        self.master.bind("<Key>", self.keydown)
+
         self.time_of_resize_drawing = time.time()
         # self.time_of_last_resize = time.time()
         self.resize_thread = threading.Thread(target=self.resized_draw,args=(True,))
         self.refresh_thread = None
         # self.resize_event = None
         self.resize_thread.start()
+
+        self.last_parameters = tuple()
+
+    def keydown(self,event):
+        if event.char == 'a':
+            # if not self.refresh_thread or not self.refresh_thread.is_alive():
+            #     self.refresh_thread = threading.Thread(target=self.animate_colors, args=(3,2))
+            #     self.refresh_thread.start()
+            self.animate_colors(self.color_cycle_speed,self.color_cycle_speed*1000,0.01)
+            return
+
+    def animate_colors(self, start, stop, speed):
+        assert stop > start and speed > 0, "stop > start and speed > 0 has to hold true"
+        print("GO!")
+        self.color_cycle_speed = start
+        while self.color_cycle_speed < stop:
+            self.draw()
+            self.canvas.update()
+            self.color_cycle_speed *= speed * 1.5**(-log(self.color_cycle_speed/start)) +1
+            # time.sleep(1/framerate)
+            # print(float('%.4g' % self.color_cycle_speed),"\t\t\t",speed * 3**(-min(log(self.color_cycle_speed/start)**0.75 *2,4)),end="\t\t\t")
+        self.control_panel.update_values()
 
     def update_values(self,event):
         if self.refresh_thread is None or not self.refresh_thread.is_alive():
@@ -209,10 +234,15 @@ class FractalFrame(Frame):
             if None in {width, height, iterations}:
                 width, height, iterations = self.width, self.height, self.iterations
 
-            zoom_out_box = self.get_rect_coords(event) if out and not colors_changed else None
+            # zoom_out_box = self.get_rect_coords(event) if out and not colors_changed else None
+
+            same_pos = self.last_parameters and self.last_parameters[:4] == (width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()))
+            same_iters = self.last_parameters and self.last_parameters[4] == iterations
+            same_colors = self.last_parameters and self.last_parameters[5:7] == (self.colormap, self.color_cycle_speed)
+            self.last_parameters = (width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed)
 
             start = time.time()
-            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed)#, self.processes, zoom_out_box)
+            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed,same_pos,same_iters,same_colors)#, self.processes, zoom_out_box)
             # TODO: do this with an async Coroutine (something like JS's setInterval() instead of time.sleep()?) to prevent flickering!
             # self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos, out, colors_changed))
             # self.refresh_thread.start() # <- without cuda
@@ -220,8 +250,15 @@ class FractalFrame(Frame):
             # <cuda stuff>
             print(time.time()-start,"seconds")
             old_view = self.current_view
-            self.image = ImageTk.PhotoImage(Image.fromarray(numpy.swapaxes(array,0,1),mode='HSV'))
-            self.current_view = self.canvas.create_image(0,0,image=self.image, anchor=NW)
+            if same_pos and same_colors:
+                mask = self.image.convert('L')              # make it grayscale
+                mask = mask.point(lambda p: p > 0 and 255)  # make all pixels with values above 0 white
+                self.image = Image.composite(self.image, Image.fromarray(numpy.swapaxes(array,0,1),mode='HSV'), mask)
+            else:
+                self.image = Image.fromarray(numpy.swapaxes(array,0,1),mode='HSV')
+                
+            self.photo_image = ImageTk.PhotoImage(self.image)
+            self.current_view = self.canvas.create_image(0,0,image=self.photo_image, anchor=NW)
             if old_view is not None:
                     self.canvas.delete(old_view) 
             self.canvas.tag_raise(self.rectangle)
@@ -364,7 +401,6 @@ class FractalFrame(Frame):
 import sys
 from multiprocessing import freeze_support
 
-
 if __name__ == '__main__':
 
     # this is VITAL when creating an .exe file:
@@ -372,22 +408,29 @@ if __name__ == '__main__':
     # without it, __main__ will get called upon every creation of a new multiprocessing process
     # source: https://stackoverflow.com/a/27694505
 
-    processes,w,h = None,600,600
+    w,h,real_center,imag_center,zoom_level,iterations = 600,600,0,0,0.25,500
 
     try:
-        processes = int(sys.argv[1])
-        w = int(sys.argv[2])
-        h = int(sys.argv[3])
+        w = int(sys.argv[1])
+        h = int(sys.argv[2])
+        real_center = float(sys.argv[3])
+        imag_center = float(sys.argv[4])
+        zoom_level = float(sys.argv[5])
+        iterations = int(sys.argv[6])
     except:
         pass
 
+    import ctypes
+    user32 = ctypes.windll.user32
+    screensize = user32.GetSystemMetrics(0), user32.GetSystemMetrics(1)
+
     root = Tk()
-    if (w,h)==(1920,1080):
+    if (w,h)==screensize:
         root.attributes("-fullscreen", True)
     else:
         root.geometry(f"{w}x{h}")
 
-    FractalFrame(root,w,h,processes=processes).pack()
+    FractalFrame(root,w,h,z_center=complex(real_center,imag_center),zoom_level=zoom_level,iterations=iterations).pack()
 
     # def keydown(event):
     #     if event.char == 's':
