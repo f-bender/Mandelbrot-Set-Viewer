@@ -2,10 +2,6 @@ import numpy
 import time
 # from colormap import Colormap
 
-# import pycuda
-# import pycuda.driver as cuda
-# from pycuda.compiler import SourceModule
-
 from numba import vectorize, cuda
 
 # THIS RUNS IN ANACONDA3 PROMPT (base)
@@ -21,23 +17,34 @@ from numba import vectorize, cuda
 #             i = int(i*color_cycle_speed)
 #             return (i%255) if ((i//255) % 2) == 0 else 255-(i%255)
 #     return 0
+import cmath
 
-@vectorize(['uint8(int32, float32)'], target='cuda')
-def get_colors_from_iters(a, color_cycle_speed):
-    if a < 0: return 255
-    return int(a*color_cycle_speed)%255
+# @vectorize(['uint8(int32, float32)'], target='cuda')
+# def get_colors_from_iters(a, color_cycle_speed):
+#     if a < 0: return 255
+#     return int(a*color_cycle_speed)%255
 
-@vectorize(['int32(float64, float64,int32)'], target='cuda')
-def get_iters_from_RE_IM(a,b,iterations):
+@vectorize(['uint8(float64, float64,int32,float32,float32)'], target='cuda')
+def get_colors_from_RE_IM(a,b,iterations,color_cycle_speed,d):
     c = complex(a,b)
-    if abs(c) < 0.25:
-        return -1
+    # if abs(c) < 0.25:
+    #     return -1
     z = c
     for i in range(iterations):
-        z = z*z + c
+        # z= z*z + c
+        z = -cmath.rect(abs(z)**d,cmath.phase(z)*d) + z - 0.2j
+
+        # z = z*z + c - 0.742j -0.1
+
+
+
+        # interesting:
+        # z = z*z + d*(1+1j)
+        # z = -z*z*z+z-d*1j # around d=0.2
+
         if abs(z) > 2:
-            return i
-    return -1
+            return int(i*color_cycle_speed)%255
+    return 255
 
 # @vectorize(['uint8(float64, float64,int32,float32)'], target='cuda')
 # def get_hue_from_RE_IM(a,b,iterations,color_cycle_speed):
@@ -60,70 +67,61 @@ last_parameters = tuple()
 # ignored_box = None
 iters = None
                                                                                                                 #TODO next! Danach dann endlich das Bild/ Video saven (Button, Prompt)
-def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed, same_pos, same_iters, same_colors, zoom_out_box=None):
+def get_image_array(w, h,z_center,z_width,iterations,color_cycle_speed, same_pos, same_iters, same_colors, zoom_out_box=None,d=2):
     global iters, last_parameters
     # print(last_parameters[:5])
     # print(w,h,z_center,z_width,iterations)
-    if same_pos and same_iters:
-        last_parameters = (w,h,z_center,z_width,iterations,color_cycle_speed)
-        hues = get_colors_from_iters(iters, color_cycle_speed)
+    # if same_pos and same_iters:
+    #     last_parameters = (w,h,z_center,z_width,iterations,color_cycle_speed)
+    #     hues = get_colors_from_iters(iters, color_cycle_speed)
 
-        sb = numpy.full([w,h],255,dtype=numpy.uint8)
+    #     sb = numpy.full([w,h],255,dtype=numpy.uint8)
 
-        red_areas = hues == 255
-        sb[red_areas] = 0
+    #     red_areas = hues == 255
+    #     sb[red_areas] = 0
 
-        return numpy.dstack((hues,sb,sb))
+    #     return numpy.dstack((hues,sb,sb))
 
-    elif same_pos and same_colors:
-        last_parameters = (w,h,z_center,z_width,iterations,color_cycle_speed)
+    # elif same_pos and same_colors:
+    #     last_parameters = (w,h,z_center,z_width,iterations,color_cycle_speed)
 
-        non_black_areas = iters != -1
-        black_areas = numpy.logical_not(non_black_areas)
+    #     non_black_areas = iters != -1
+    #     black_areas = numpy.logical_not(non_black_areas)
 
-        t = time.time()
+    #     t = time.time()
 
-        # real = numpy.empty([w,h],dtype=numpy.float64)
-        # imag = numpy.empty([w,h],dtype=numpy.float64)
-        # for x in range(w):
-        #     for y in range(h):
-        #         real[x,y] = z_center.real + (x/w - 0.5)*z_width if black_areas[x,y] else 0
-        #         imag[x,y] = z_center.imag - (y/w - h/(2*w))*z_width if black_areas[x,y] else 0
+    #     # real = numpy.empty([w,h],dtype=numpy.float64)
+    #     # imag = numpy.empty([w,h],dtype=numpy.float64)
+    #     # for x in range(w):
+    #     #     for y in range(h):
+    #     #         real[x,y] = z_center.real + (x/w - 0.5)*z_width if black_areas[x,y] else 0
+    #     #         imag[x,y] = z_center.imag - (y/w - h/(2*w))*z_width if black_areas[x,y] else 0
 
-        real = numpy.empty([w,h],dtype=numpy.float64)
-        real.T[:] = [z_center.real + (x/w - 0.5)*z_width for x in range(w)]
-        imag = numpy.empty([w,h],dtype=numpy.float64)
-        imag[:] = [z_center.imag - (y/w - h/(2*w))*z_width for y in range(h)]
+    #     real = numpy.empty([w,h],dtype=numpy.float64)
+    #     real.T[:] = [z_center.real + (x/w - 0.5)*z_width for x in range(w)]
+    #     imag = numpy.empty([w,h],dtype=numpy.float64)
+    #     imag[:] = [z_center.imag - (y/w - h/(2*w))*z_width for y in range(h)]
 
-        real[non_black_areas] = 0
-        imag[non_black_areas] = 0
+    #     real[non_black_areas] = 0
+    #     imag[non_black_areas] = 0
 
-        # print(f"{time.time()-t} seconds to fill in elif")
+    #     print(f"{time.time()-t} seconds to fill in elif")
 
-        iters[black_areas] = get_iters_from_RE_IM(real,imag, iterations)[black_areas]
-        hues = get_colors_from_iters(iters, color_cycle_speed)
+    #     iters[black_areas] = get_iters_from_RE_IM(real,imag, iterations)[black_areas]
+    #     hues = get_colors_from_iters(iters, color_cycle_speed)
 
-        sb = numpy.full([w,h],255,dtype=numpy.uint8)
+    #     sb = numpy.full([w,h],255,dtype=numpy.uint8)
 
-        red_areas = hues == 255
-        sb[red_areas] = 0
+    #     red_areas = hues == 255
+    #     sb[red_areas] = 0
 
-        return numpy.dstack((hues,sb,sb))
+    #     return numpy.dstack((hues,sb,sb))
 
 
     last_parameters = (w,h,z_center,z_width,iterations,color_cycle_speed)
 
-    # mod = SourceModule("""
-    # __global__ void f(float * out, float * in)
-    # {
-    #     int idx = threadIdx.x;
-    #     out[idx] = in[idx] + 6;
-    # }
-    # """)
-    # func = mod.get_function("f")
-
     # WORKS!
-    t = time.time()
+    # t = time.time()
     real = numpy.empty([w,h],dtype=numpy.float64)
     real.T[:] = [z_center.real + (x/w - 0.5)*z_width for x in range(w)]
     imag = numpy.empty([w,h],dtype=numpy.float64)
@@ -136,10 +134,10 @@ def get_image_array(w, h,z_center,z_width,iterations,colormap,color_cycle_speed,
 
     # red_areas = iters == 255
     # sb[red_areas] = 0
-
+    print(d)
     # colors = numpy.dstack((iters,sb,sb))
-    iters = get_iters_from_RE_IM(real,imag, iterations)
-    hues = get_colors_from_iters(iters, color_cycle_speed)
+    # iters = get_iters_from_RE_IM(real,imag, iterations,d)
+    hues = get_colors_from_RE_IM(real,imag,iterations,color_cycle_speed,d)
 
     sb = numpy.full([w,h],255,dtype=numpy.uint8)
 

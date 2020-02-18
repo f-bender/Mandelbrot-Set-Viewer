@@ -2,7 +2,6 @@ from tkinter import *
 from PIL import Image, ImageTk
 import numpy
 import time
-from colormap import Colormap
 import mandelbrot_image_cuda as image_creator
 import threading
 from math import ceil, log
@@ -98,7 +97,7 @@ class FractalFrame(Frame):
 
 
     def __init__(self,master=None,width=1000, height=1000, iterations=200, color_cycle_speed=5, zoom_level=0.25, z_center=0+0j,
-                colormap=Colormap([(255,0,0),(255,255,0),(0,255,0),(0,255,255),(0,0,255),(255,0,255)] ,cyclic=True), processes=None, fluid_animation=False):
+                processes=None, fluid_animation=False):
         assert width >= 300 and height >= 200 , "Minimum dimensions are 300x200"
         super().__init__(master)
         if processes is None:
@@ -112,7 +111,6 @@ class FractalFrame(Frame):
         # height of the image (the Frame without the control panel)
         self.height = int(min(0.9*self.complete_height,self.complete_height-100))
         self.width = width
-        self.colormap = colormap
         self.iterations = iterations
         self.color_cycle_speed = color_cycle_speed
         self.canvas = Canvas(self, width=width, height=height)
@@ -152,28 +150,48 @@ class FractalFrame(Frame):
         self.refresh_thread = None
         # self.resize_event = None
         self.resize_thread.start()
+        self.animating = False
 
         self.last_parameters = tuple()
+        self.d=2
+        self.speed = 0.001
+        self.stop = False
 
     def keydown(self,event):
         if event.char == 'a':
             # if not self.refresh_thread or not self.refresh_thread.is_alive():
             #     self.refresh_thread = threading.Thread(target=self.animate_colors, args=(3,2))
             #     self.refresh_thread.start()
-            self.animate_colors(self.color_cycle_speed,self.color_cycle_speed*333,0.15)
+            if not self.animating:
+                self.animate_colors(self.color_cycle_speed,self.color_cycle_speed*1000,0.01)
+            else:
+                self.stop = True
+            return
+        if event.char == 's':
+            self.speed *= 0.1
+            return
+        if event.char == 'w':
+            self.speed *= 10
+            return
+        if event.char == 'd':
+            self.speed *= -1
             return
 
     def animate_colors(self, start, stop, speed):
         assert stop > start and speed > 0, "stop > start and speed > 0 has to hold true"
+        self.animating = True
         print("GO!")
         self.color_cycle_speed = start
-        while self.color_cycle_speed < stop:
+        while not self.stop:
             self.draw()
             self.canvas.update()
-            self.color_cycle_speed *= speed * start/self.color_cycle_speed +1
+            # self.color_cycle_speed *= speed * 1.5**(-log(self.color_cycle_speed/start)) +1
+            self.d+=self.speed
             # time.sleep(1/framerate)
-            print(float('%.4g' % self.color_cycle_speed),end="\t\t\t")
+            # print(float('%.4g' % self.color_cycle_speed),"\t\t\t",speed * 3**(-min(log(self.color_cycle_speed/start)**0.75 *2,4)),end="\t\t\t")
         self.control_panel.update_values()
+        self.animating = False
+        self.stop = False
 
     def update_values(self,event):
         if self.refresh_thread is None or not self.refresh_thread.is_alive():
@@ -238,19 +256,19 @@ class FractalFrame(Frame):
 
             same_pos = self.last_parameters and self.last_parameters[:4] == (width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()))
             same_iters = self.last_parameters and self.last_parameters[4] == iterations
-            same_colors = self.last_parameters and self.last_parameters[5:7] == (self.colormap, self.color_cycle_speed)
-            self.last_parameters = (width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed)
+            same_colors = self.last_parameters and self.last_parameters[5] ==  self.color_cycle_speed
+            self.last_parameters = (width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.color_cycle_speed)
 
-            start = time.time()
-            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.colormap, self.color_cycle_speed,same_pos,same_iters,same_colors)#, self.processes, zoom_out_box)
+            # start = time.time()
+            array = image_creator.get_image_array(width, height, self.z_center, 1/float('%.4g' % self.get_zoom_level()), iterations, self.color_cycle_speed,same_pos,same_iters,same_colors,d=self.d)#, self.processes, zoom_out_box)
             # TODO: do this with an async Coroutine (something like JS's setInterval() instead of time.sleep()?) to prevent flickering!
             # self.refresh_thread = threading.Thread(target=self.redraw, args=(start,numpy.swapaxes(array,0,1),event, same_pos, out, colors_changed))
             # self.refresh_thread.start() # <- without cuda
             
             # <cuda stuff>
-            print(time.time()-start,"seconds")
+            # print(time.time()-start,"seconds")
             old_view = self.current_view
-            if same_pos and same_colors:
+            if False:#same_pos and same_colors:
                 mask = self.image.convert('L')              # make it grayscale
                 mask = mask.point(lambda p: p > 0 and 255)  # make all pixels with values above 0 white
                 self.image = Image.composite(self.image, Image.fromarray(numpy.swapaxes(array,0,1),mode='HSV'), mask)
@@ -377,7 +395,8 @@ class FractalFrame(Frame):
         self.iterations, self.color_cycle_speed = self.control_panel.get_values()[2:4]
         self.control_panel.update_values()
         
-        self.draw(event, out=True, colors_changed=changed)
+        if not self.animating:
+            self.draw(event, out=True, colors_changed=changed)
 
     def zoom_in_draw(self,event):
         x_off, y_off = event.x-self.width/2, self.height/2-event.y
@@ -385,8 +404,9 @@ class FractalFrame(Frame):
         self.z_width *= self.rect_width/self.width
         self.iterations, self.color_cycle_speed = self.control_panel.get_values()[2:4]
         self.control_panel.update_values()
-        
-        self.draw(event)
+
+        if not self.animating:
+            self.draw(event)
 
     def reset_view(self):
         self.z_width, self.z_center, self.iterations = self.default_parameters
