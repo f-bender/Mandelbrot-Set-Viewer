@@ -32,7 +32,7 @@ def get_colors_from_RE_IM(a,b,iterations,color_cycle_speed,d):
     z = c
     for i in range(iterations):
         # z= z*z + c
-        z = -cmath.rect(abs(z)**d,cmath.phase(z)*d) + z - 0.2j
+        # z = -cmath.rect(abs(z)**d,cmath.phase(z)*d) + z - 0.2j
 
         # z = z*z + c - 0.742j -0.1
 
@@ -40,7 +40,7 @@ def get_colors_from_RE_IM(a,b,iterations,color_cycle_speed,d):
 
         # interesting:
         # z = z*z + d*(1+1j)
-        # z = -z*z*z+z-d*1j # around d=0.2
+        z = -z*z*z+z-d*1j # around d=0.2
 
         if abs(z) > 2:
             return int(i*color_cycle_speed)%255

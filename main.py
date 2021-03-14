@@ -29,7 +29,7 @@ from mandelbrot_image_multiprocessing import get_image_array
 #     return_val = async_result.get()  # get the return value from your function.
 #     print(return_val)
 
-
+import cmath
 if __name__ == '__main__':
 
     arr=numpy.zeros([5,6,3])
@@ -42,6 +42,10 @@ if __name__ == '__main__':
     ful = numpy.empty([5,6,3])
     ful[:] = [0,1,2]
     print(ful)
+
+
+    # z = cmath.rect(cmath.phase(z)*d,abs(z)**d) + c
+    # z = z**2 + c
 
 
 

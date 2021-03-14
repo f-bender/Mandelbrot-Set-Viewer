@@ -5,10 +5,11 @@ import time
 from colormap import Colormap
 import mandelbrot_image_cuda as image_creator
 import threading
-from math import ceil, log
+from math import ceil, log, log2
 
 CHAR_WIDTH = 8
 Z_CENTER_DIGITS = 22
+SCALE_LENGTH = 200
 
 class FractalFrame(Frame):
 
@@ -25,17 +26,23 @@ class FractalFrame(Frame):
             self.imag = Entry(self,width=Z_CENTER_DIGITS)
             self.imag.grid(column=2,row=3,sticky='w')
 
-            Label(self,text="Zoomlevel").grid(column=3,row=1)
-            self.zoom = Entry(self,width=10)
-            self.zoom.grid(column=4,row=1,sticky='w')
+            Label(self,text="Zoomlevel").grid(column=1,row=4)
+            self.zoom = Entry(self,width=Z_CENTER_DIGITS)
+            self.zoom.grid(column=2,row=4,sticky='w')
 
-            Label(self,text="Iterations").grid(column=3,row=2)
-            self.iters = Entry(self,width=10)
-            self.iters.grid(column=4,row=2,sticky='w')
+            Label(self,text="Iterations").grid(column=3,row=1)
+            self.iters = Entry(self,width=Z_CENTER_DIGITS)
+            self.iters.grid(column=4,row=1,sticky='w')
 
-            Label(self,text="Color Cycle Speed").grid(column=3,row=3)
-            self.color_cycle_speed = Entry(self,width=10)
+            Label(self,text="Color Cycle Speed:").grid(column=3,row=2)
+            Label(self,text="Exponent (Base 2)").grid(column=3,row=3)
+            Label(self,text="Factor").grid(column=3,row=4)
+            self.color_cycle_speed_entry = Entry(self,width=Z_CENTER_DIGITS)
+            self.color_cycle_speed_entry.grid(column=4,row=2,sticky='w')
+            self.color_cycle_speed = Scale(self,from_=-15, to=4, orient=HORIZONTAL, command=self.scale1_moved, length=SCALE_LENGTH, width=10)
             self.color_cycle_speed.grid(column=4,row=3,sticky='w')
+            self.color_cycle_speed2 = Scale(self,from_=1, to=2, resolution=0.01, orient=HORIZONTAL, command=self.scale2_moved, length=SCALE_LENGTH, width=10)
+            self.color_cycle_speed2.grid(column=4,row=4,sticky='w')
 
             self._padx = 10
             self._pady = 10
@@ -48,9 +55,28 @@ class FractalFrame(Frame):
             self.imag.bind('<Return>',self.master.update_values)
             self.zoom.bind('<Return>',self.master.update_values)
             self.iters.bind('<Return>',self.master.update_values)
-            self.color_cycle_speed.bind('<Return>',self.master.update_values)
+            self.color_cycle_speed_entry.bind('<Return>',self.master.update_values)
 
             self.update_values()
+
+        def scale1_moved(self, value):
+            self.master.update_ccs(value)
+            self.update_ccs_entry()
+
+        def scale2_moved(self, value):
+            self.master.update_ccs2(value)
+            self.update_ccs_entry()
+
+        def update_ccs_entry(self):
+            self.color_cycle_speed_entry.delete(0,END)
+            self.color_cycle_speed_entry.insert(END,self.fractal.color_cycle_speed)
+
+        def update_scale(self):
+            exp = int(log2(self.fractal.color_cycle_speed))
+            print(self.fractal.color_cycle_speed, exp, self.fractal.color_cycle_speed/(2**exp))
+            self.color_cycle_speed.set(exp)
+            self.color_cycle_speed2.set(self.fractal.color_cycle_speed/(2**exp))
+            print(self.color_cycle_speed.get(), self.color_cycle_speed2.get())
 
         def get_required_height(self):
             return self.grid_bbox()[3] + 2*self._pady
@@ -60,21 +86,24 @@ class FractalFrame(Frame):
             self.imag.delete(0,END)
             self.zoom.delete(0,END)
             self.iters.delete(0,END)
-            self.color_cycle_speed.delete(0,END)
+            self.color_cycle_speed_entry.delete(0,END)
 
             self.real.insert(END,self.fractal.z_center.real)
             self.imag.insert(END,self.fractal.z_center.imag)
             self.zoom.insert(END,'%.4g' % self.fractal.get_zoom_level())
             self.iters.insert(END,self.fractal.iterations)
-            self.color_cycle_speed.insert(END,self.fractal.color_cycle_speed)
+            self.color_cycle_speed_entry.insert(END,self.fractal.color_cycle_speed)
+            self.update_scale()
         
         def resize(self):
             # time.sleep(0.01)
             self.real.config(width=Z_CENTER_DIGITS)
             self.imag.config(width=Z_CENTER_DIGITS)
-            self.zoom.config(width=10)
-            self.iters.config(width=10)
-            self.color_cycle_speed.config(width=10)
+            self.zoom.config(width=Z_CENTER_DIGITS)
+            self.iters.config(width=Z_CENTER_DIGITS)
+            self.color_cycle_speed_entry.config(width=Z_CENTER_DIGITS)
+            self.color_cycle_speed.config(length=SCALE_LENGTH)
+            self.color_cycle_speed2.config(length=SCALE_LENGTH)
             if self.grid_bbox()[2] > self.winfo_width():
                 rest_width = self.winfo_width() - self.grid_bbox(1,0,1,0)[2] - self.grid_bbox(3,0,3,0)[2]
                 entry_width = int(rest_width/2/CHAR_WIDTH)
@@ -82,16 +111,26 @@ class FractalFrame(Frame):
                 self.imag.config(width=entry_width)
                 self.zoom.config(width=entry_width)
                 self.iters.config(width=entry_width)
-                self.color_cycle_speed.config(width=entry_width)
+                self.color_cycle_speed_entry.config(width=entry_width)
+                self.color_cycle_speed.config(length=rest_width/2)
+                self.color_cycle_speed2.config(length=rest_width/2)
 
 
-        def get_values(self):
+        def get_values_scale(self):
             return (
                 complex(float(self.real.get()), float(self.imag.get())),
                 1/float(self.zoom.get()),
                 int(self.iters.get()),
-                float(self.color_cycle_speed.get())
+                2**float(self.color_cycle_speed.get()) * float(self.color_cycle_speed2.get())
             )
+
+        def get_values(self):
+                return (
+                    complex(float(self.real.get()), float(self.imag.get())),
+                    1/float(self.zoom.get()),
+                    int(self.iters.get()),
+                    float(self.color_cycle_speed_entry.get())
+                )
 
 
 
@@ -154,13 +193,14 @@ class FractalFrame(Frame):
         self.resize_thread.start()
 
         self.last_parameters = tuple()
+        self.last_ccs = 0
 
     def keydown(self,event):
         if event.char == 'a':
             # if not self.refresh_thread or not self.refresh_thread.is_alive():
             #     self.refresh_thread = threading.Thread(target=self.animate_colors, args=(3,2))
             #     self.refresh_thread.start()
-            self.animate_colors(self.color_cycle_speed,self.color_cycle_speed*333,0.15)
+            self.animate_colors(self.color_cycle_speed,self.color_cycle_speed*500,0.15)
             return
 
     def animate_colors(self, start, stop, speed):
@@ -170,18 +210,35 @@ class FractalFrame(Frame):
         while self.color_cycle_speed < stop:
             self.draw()
             self.canvas.update()
-            self.color_cycle_speed *= speed * start/self.color_cycle_speed +1
+            self.color_cycle_speed *= speed * start/self.color_cycle_speed**0.5 +1
             # time.sleep(1/framerate)
             print(float('%.4g' % self.color_cycle_speed),end="\t\t\t")
         self.control_panel.update_values()
 
+    def update_ccs(self, value):
+        if self.last_ccs > float(value):
+            self.control_panel.color_cycle_speed2.set(2.0)
+        else:
+            self.control_panel.color_cycle_speed2.set(1.0)
+        self.last_ccs = float(value)
+        self.color_cycle_speed = 2**float(value) * float(self.control_panel.color_cycle_speed2.get())
+        self.draw(same_pos=True)
+
+    def update_ccs2(self, value):
+        self.color_cycle_speed = 2**float(self.control_panel.color_cycle_speed.get()) * float(value)
+        self.draw(same_pos=True)
+
     def update_values(self,event):
+        print("called update values")
         if self.refresh_thread is None or not self.refresh_thread.is_alive():
             same_pos = False
             if self.z_center == self.control_panel.get_values()[0] and self.control_panel.get_values()[1] == 1/float('%.4g' % self.get_zoom_level()):
                 same_pos = True
             self.z_center, self.z_width, self.iterations, self.color_cycle_speed = self.control_panel.get_values()
+            self.control_panel.update_scale()
+            print("now draw")
             self.draw(same_pos=same_pos)
+            print("done")
 
     def resized_draw(self,init=False):
         if not init:
@@ -263,6 +320,9 @@ class FractalFrame(Frame):
                     self.canvas.delete(old_view) 
             self.canvas.tag_raise(self.rectangle)
             # </cuda stuff>
+
+            self.control_panel.update_scale()
+            print("drawn",int(time.time()%100))
 
 
 
@@ -374,7 +434,7 @@ class FractalFrame(Frame):
         self.z_center -= complex(real = x_off*self.z_width/self.rect_width , imag = y_off*self.z_width/self.rect_width)
         self.z_width *= self.width/self.rect_width
         changed = (self.iterations, self.color_cycle_speed) != self.control_panel.get_values()[2:4]
-        self.iterations, self.color_cycle_speed = self.control_panel.get_values()[2:4]
+        self.iterations, self.color_cycle_speed = self.control_panel.get_values_scale()[2:4]
         self.control_panel.update_values()
         
         self.draw(event, out=True, colors_changed=changed)
@@ -383,7 +443,7 @@ class FractalFrame(Frame):
         x_off, y_off = event.x-self.width/2, self.height/2-event.y
         self.z_center += complex(real = x_off*self.z_width/self.width , imag = y_off*self.z_width/self.width)
         self.z_width *= self.rect_width/self.width
-        self.iterations, self.color_cycle_speed = self.control_panel.get_values()[2:4]
+        self.iterations, self.color_cycle_speed = self.control_panel.get_values_scale()[2:4]
         self.control_panel.update_values()
         
         self.draw(event)

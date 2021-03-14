@@ -1,0 +1,1 @@
+to run cuda version, start Anaconda3 Prompt, go to this directory, type "python FractalFrame.py"
