@@ -2,7 +2,7 @@ from tkinter import *
 from PIL import Image, ImageTk
 import numpy
 import time
-import mandelbrot_image_cuda as image_creator
+import mandelbrot_iterations_calculator._mandelbrot_iterations_calculator as image_creator
 import threading
 from math import ceil, log
 
