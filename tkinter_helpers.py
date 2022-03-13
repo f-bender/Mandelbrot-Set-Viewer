@@ -1,9 +1,12 @@
-''' Credits: https://stackoverflow.com/a/36221216
-'''
+
 
 # pylint: disable-all
+from distutils import command
 import tkinter as tk
+from tkinter import ttk
 
+
+# Source: https://stackoverflow.com/a/36221216
 class CreateToolTip(object):
     """
     create a tooltip for a given widget
@@ -56,3 +59,41 @@ class CreateToolTip(object):
         self.tw= None
         if tw:
             tw.destroy()
+
+
+# adapted from https://stackoverflow.com/a/10065345
+class Mbox(object):
+
+    def __init__(self, root, title, info, inputs, callback, font=None):
+        """
+        msg = <str> the message to be displayed
+        dict_key = <sequence> (dictionary, key) to associate with user input
+        (providing a sequence for dict_key creates an entry for user input)
+        """
+        self.top = tk.Toplevel(root)
+        self.top.title(title)
+
+        frm = ttk.Frame(self.top, borderwidth=4, relief='ridge')
+        frm.pack(fill='both', expand=True)
+
+        ttk.Label(frm, text=info, font=font).grid(row=0, column=1, columnspan=2, padx=3, pady=3)
+
+        def clicked(event=None):
+            result = callback([entry.get() for entry in entries])
+            self.top.destroy()
+            return result
+
+        entries = []
+        for idx, name in enumerate(inputs):
+            ttk.Label(frm, text=name, font=font).grid(row=idx+1, column=1, padx=3, pady=3, sticky='e')
+            entry = ttk.Entry(frm)
+            entry.grid(row=idx+1, column=2, padx=3, pady=3, sticky='w')
+            entry.bind('<Return>', clicked)
+            entries.append(entry)
+
+        ttk.Button(
+            frm,
+            text='Save Image',
+            command=clicked
+        ).grid(row=len(inputs)+1, column=1, columnspan=2, padx=3, pady=3)
+

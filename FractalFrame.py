@@ -1,13 +1,14 @@
 from argparse import ArgumentParser
+import os
 import threading
 import time
 import tkinter as tk
 from tkinter import ttk
-import numpy
+import numpy as np
 from PIL import Image, ImageTk
 
-from mandelbrot_iterations_calculator import get_image_array
-from tkinter_helpers import CreateToolTip
+from mandelbrot_iterations_calculator import get_iterations_per_pixel
+from tkinter_helpers import CreateToolTip, Mbox
 
 class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-instance-attributes
     ''' A class for showing mandelbrot-set-like fractals in a tkinter frame
@@ -17,7 +18,7 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
     REDRAW_DELAY = 0.5 # seconds
     RECT_THICKNESS = 2 # pixels
     RECT_COLOR = 'gray'
-    MIN_RECT_WIDTH = 6
+    MIN_RECT_WIDTH = 6 # pixels
 
     class ControlPanel(tk.Frame): # pylint: disable=too-many-ancestors
         ''' A panel to control some values related to the displayed fractal
@@ -45,17 +46,17 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
             self.center_real_entry = ttk.Entry(self, width=self.ENTRY_WIDTH)
             self.center_real_entry.grid(column=2, row=2, sticky='w', padx=5, pady=2)
 
-            ttk.Label(self,text='Imaginary Part', font=self.DEFAULT_FONT).grid(column=1, row=3, padx=5, pady=2)
+            ttk.Label(self, text='Imaginary Part', font=self.DEFAULT_FONT).grid(column=1, row=3, padx=5, pady=2)
             self.center_imaginary_entry = ttk.Entry(self, width=self.ENTRY_WIDTH)
             self.center_imaginary_entry.grid(column=2 ,row=3, sticky='w', padx=5, pady=2)
 
-            ttk.Label(self,text='Zoom Level', font=self.DEFAULT_FONT).grid(column=4, row=1, padx=5, pady=2)
+            ttk.Label(self, text='Zoom Level', font=self.DEFAULT_FONT).grid(column=4, row=1, padx=5, pady=2)
             self.zoom_level_entry = ttk.Entry(self, width=self.ENTRY_WIDTH)
             self.zoom_level_entry.grid(column=5, row=1, sticky='w', padx=5, pady=2)
 
             ttk.Separator(self, orient=tk.VERTICAL).grid(column=3, row=1, rowspan=3, sticky='ns', padx=5, pady=2)
 
-            iterations_label = ttk.Label(self,text='Iterations', font=self.DEFAULT_FONT)
+            iterations_label = ttk.Label(self, text='Iterations', font=self.DEFAULT_FONT)
             iterations_label.grid(column=4, row=2, padx=5, pady=2)
             CreateToolTip(
                 iterations_label,
@@ -65,15 +66,18 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
             self.iterations_entry = ttk.Entry(self, width=self.ENTRY_WIDTH)
             self.iterations_entry.grid(column=5, row=2, sticky='w', padx=5, pady=2)
 
-            color_cycle_speed_label = ttk.Label(self,text='Color Cycle Speed:', font=self.DEFAULT_FONT)
+            color_cycle_speed_label = ttk.Label(self, text='Color Cycle Speed:', font=self.DEFAULT_FONT)
             color_cycle_speed_label.grid(column=4,row=3, padx=5, pady=2)
             CreateToolTip(
                 color_cycle_speed_label,
                 ('The speed at which colors change in relation to the number of iterations that have to be made before the value explodes. '
                  'Lower values result in a more gradual change, higher values result in a more drastic change of colors.')
             )
-            self.color_cycle_speed_entry = ttk.Entry(self,width=self.ENTRY_WIDTH)
+            self.color_cycle_speed_entry = ttk.Entry(self, width=self.ENTRY_WIDTH)
             self.color_cycle_speed_entry.grid(column=5,row=3,sticky='w', padx=5, pady=2)
+
+            self.save_image_button = ttk.Button(self, text='Save Image', width=self.ENTRY_WIDTH, command=self.save_image_prompt)
+            self.save_image_button.grid(column=1, row=4, columnspan=5, padx=5, pady=2)
 
             # center align columns 1-5 by adding weighted empty columns left and right
             self.grid_columnconfigure(0, weight=1)
@@ -88,6 +92,19 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
                 entry.bind('<Return>', self.master.update_values)
 
             self.update_values()
+
+        def save_image_prompt(self):
+            Mbox(
+                self.master,
+                font=self.DEFAULT_FONT,
+                title='Save Image',
+                info=(
+                    'Enter width height and number of iterations for the image to be saved.\n'
+                    'Leave a box empty to use the value of the currently displayed image.'
+                ),
+                inputs=['Width', 'Height', 'Iterations'],
+                callback=lambda values: self.master.save_image(*values)
+            )
 
         def adjust_entry(self, event):
             if event.keycode not in (38, 40):
@@ -117,7 +134,7 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
                 self.center_real_entry: self.master.z_center.real,
                 self.center_imaginary_entry: self.master.z_center.imag,
                 self.zoom_level_entry: '%.4g' % self.master.zoom_level,
-                self.iterations_entry: self.master.iterations,
+                self.iterations_entry: self.master.max_iterations,
                 self.color_cycle_speed_entry: self.master.color_cycle_speed,
             }
 
@@ -129,14 +146,14 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
             return {
                 'center': complex(float(self.center_real_entry.get()), float(self.center_imaginary_entry.get())),
                 'zoom_level': float(self.zoom_level_entry.get()),
-                'iterations': int(self.iterations_entry.get()),
+                'max_iterations': int(self.iterations_entry.get()),
                 'color_cycle_speed': float(self.color_cycle_speed_entry.get()),
             }
 
     def __init__(
         self,
         master,
-        iterations=500,
+        max_iterations=500,
         color_cycle_speed=5.0,
         zoom_level=0.3333,
         z_center=-0.7+0j,
@@ -145,7 +162,7 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
 
         self.master.minsize(*self.MIN_SIZE)
 
-        self.iterations = iterations
+        self.max_iterations = max_iterations
         self.color_cycle_speed = color_cycle_speed
         self.z_width = 1 / zoom_level
         self.z_center = z_center
@@ -155,9 +172,7 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
         self.window_width = self.window_height = self.canvas_height = -1
 
         self.canvas = tk.Canvas(self)
-        self.canvas.pack()
         self.control_panel = self.ControlPanel(self)
-        self.control_panel.pack()
 
         self.canvas.bind('<Button-1>', self.zoom_in_draw)
         self.canvas.bind('<Button-3>', self.zoom_out_draw)
@@ -171,21 +186,19 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
 
         self.rectangle = None
         self.current_view = None
-
         self.displayed_image = None
-        self.cropped = None
-        
+        self.image = None
         self.resize_thread = None
         self.time_of_resize_drawing = None
+        self.iterations_per_pixel = None
 
-        self.default_parameters = (self.z_width, self.z_center, self.iterations)
 
     def update_values(self, event=None): # pylint: disable=unused-argument
         control_panel_values = self.control_panel.get_values()
         
         self.z_center = control_panel_values['center']
         self.z_width = 1 / control_panel_values['zoom_level']
-        self.iterations = control_panel_values['iterations']
+        self.max_iterations = control_panel_values['max_iterations']
         self.color_cycle_speed = control_panel_values['color_cycle_speed']
 
         self.control_panel.update_values()
@@ -231,7 +244,7 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
                 abs(self.z_center.imag - self.last_parameters['z_center'].imag) / self.z_width < 1 / (2*self.window_width)
             same_z_width = abs(self.z_width - self.last_parameters['z_width']) / self.z_width < 1 / (2*self.window_width)
 
-            same_iterations = self.iterations == self.last_parameters['iterations']
+            same_iterations = self.max_iterations == self.last_parameters['max_iterations']
         else:
             same_size = same_center = same_z_width = same_iterations = False
 
@@ -243,31 +256,81 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
             self.last_parameters['z_width'] = self.z_width
             self.last_parameters['z_center'] = self.z_center
         if not same_iterations:
-            self.last_parameters['iterations'] = self.iterations
+            self.last_parameters['max_iterations'] = self.max_iterations
 
-        # TODO don't tell the image creator "same pos", "same iters", or "same colors", but explicitly tell him which optimizations to apply (which is determined from same_pos, same_iters, same_colors)
-        start = time.time()
-        array = get_image_array(
-            self.window_width,
-            self.canvas_height,
-            self.z_center,
-            self.z_width,
-            self.iterations,
-            self.color_cycle_speed,
-            same_position,
-            same_iterations
+        before_iterations = time.time()
+        if not (same_position and same_iterations):
+            self.iterations_per_pixel = get_iterations_per_pixel(
+                self.window_width,
+                self.canvas_height,
+                self.z_center,
+                self.z_width,
+                self.max_iterations,
+                same_position,
+                self.iterations_per_pixel,
+            )
+        after_iterations = time.time()
+
+        colors = self.iterations_to_hsv_image(self.iterations_per_pixel)
+
+        print(
+            (f'Iterations calculated in {after_iterations - before_iterations:.3f} seconds, '
+             f'Image generated in {time.time() - after_iterations:.3f} seconds'),
+            end='     \r'
         )
-        print(f'Image generated in {time.time() - start:.3f} seconds', end='     \r')
+
 
         old_view = self.current_view
-        image = Image.fromarray(numpy.swapaxes(array, 0, 1), mode='HSV')
+        self.image = Image.fromarray(np.swapaxes(colors, 0, 1), mode='HSV')
             
-        self.displayed_image = ImageTk.PhotoImage(image)
+        self.displayed_image = ImageTk.PhotoImage(self.image)
         self.current_view = self.canvas.create_image(0, 0, image=self.displayed_image, anchor=tk.NW)
         if old_view is not None:
             self.canvas.delete(old_view)
         if self.rectangle is not None:
             self.canvas.tag_raise(self.rectangle)
+
+
+    def iterations_to_hsv_image(self, iterations):
+        width, height = iterations.shape
+
+        # convert iterations values to colors
+        inside_mandelbrot = iterations == -1
+        outside_mandelbrot = np.logical_not(inside_mandelbrot)
+
+        hue = np.empty([width, height], dtype=np.uint8)
+        hue[outside_mandelbrot] = (iterations * self.color_cycle_speed)[outside_mandelbrot]
+
+        saturation_brightness = np.full([width, height], 255, dtype=np.uint8)
+        # pixels inside the mandelbrot set should be black -> 0 brightness/saturation:
+        saturation_brightness[inside_mandelbrot] = 0
+
+        return np.dstack((hue, saturation_brightness, saturation_brightness))
+
+
+    def save_image(self, width='', height='', max_iterations=''):
+        os.makedirs('images', exist_ok=True)
+        if width == height == max_iterations == '':
+            self.image.convert('RGB').save(f'images/{self.z_center}_{self.zoom_level}_{self.max_iterations}.png')
+            print(f'\nImage saved as images/{self.z_center}_{self.zoom_level}_{self.max_iterations}.png')
+        else:
+            width = int(width) if width else self.window_width
+            height = int(height) if height else self.canvas_height
+            max_iterations = int(max_iterations) if max_iterations else self.max_iterations
+
+            iterations = get_iterations_per_pixel(
+                width,
+                height,
+                self.z_center,
+                self.z_width,
+                max_iterations,
+            )
+            colors = self.iterations_to_hsv_image(iterations)
+
+            image = Image.fromarray(np.swapaxes(colors, 0, 1), mode='HSV')
+            image.convert('RGB').save(f'images/{self.z_center}_{self.zoom_level}_{max_iterations}.png')
+
+            print(f'\nImage saved as images/{self.z_center}_{self.zoom_level}_{max_iterations}.png')
 
 
     def new_rectangle(self,event):
@@ -302,7 +365,7 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
         self.z_center -= complex(x_offset * self.z_width / self.rect_width, y_offset * self.z_width / self.rect_width)
         self.z_width *= self.window_width / self.rect_width
 
-        self.iterations = control_panel_values['iterations']
+        self.max_iterations = control_panel_values['max_iterations']
         self.color_cycle_speed = control_panel_values['color_cycle_speed']
 
         self.control_panel.update_values()
@@ -316,15 +379,10 @@ class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-ins
         self.z_center += complex(x_offset * self.z_width / self.window_width, y_offset * self.z_width / self.window_width)
         self.z_width *= self.rect_width / self.window_width
 
-        self.iterations = control_panel_values['iterations']
+        self.max_iterations = control_panel_values['max_iterations']
         self.color_cycle_speed = control_panel_values['color_cycle_speed']
 
         self.control_panel.update_values()
-        self.draw()
-
-
-    def reset_view(self):
-        self.z_width, self.z_center, self.iterations = self.default_parameters
         self.draw()
 
 
@@ -364,7 +422,7 @@ def main():
         master=root,
         z_center=complex(args.center[0], args.center[1]),
         zoom_level=args.zoom_level,
-        iterations=args.iterations
+        max_iterations=args.iterations
     ).pack()
 
     root.mainloop()

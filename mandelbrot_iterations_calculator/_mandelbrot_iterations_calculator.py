@@ -2,6 +2,9 @@ import numpy as np
 from numba import vectorize, cuda
 
 
+if not cuda.is_available():
+    print('No cuda GPU available!')
+
 @vectorize(['int32(float64, float64, int32)'], target='cuda' if cuda.is_available() else 'parallel')
 def _get_iters_from_re_im(real, imag, max_iterations):
     """Given the real and imaginary part of a number, returns the number of iterations
@@ -51,16 +54,12 @@ def _get_real_imag_of_view(width, height, z_center, z_width):
     return real, imag
 
 
-iters = None # pylint: disable=invalid-name
-def get_image_array(width, height, z_center, z_width, iterations, color_cycle_speed, same_pos, same_iters):
-    global iters
+def get_iterations_per_pixel(width, height, z_center, z_width, max_iterations, same_position=False, previous_iterations=None):
+    if same_position:
+        assert previous_iterations is not None
 
-    if not same_pos:
-        real, imag = _get_real_imag_of_view(width, height, z_center, z_width)
-        iters = _get_iters_from_re_im(real, imag, iterations)
-    elif not same_iters:
         # for the values outside the mandelbrot set, we already know the number of iterations
-        known_idxs = iters != -1
+        known_idxs = previous_iterations != -1
         unknown_idxs = np.logical_not(known_idxs)
 
         real, imag = _get_real_imag_of_view(width, height, z_center, z_width)
@@ -68,16 +67,9 @@ def get_image_array(width, height, z_center, z_width, iterations, color_cycle_sp
         # ignore values for which we already know the number of iterations
         real[known_idxs] = imag[known_idxs] = 0
 
-        iters[unknown_idxs] = _get_iters_from_re_im(real, imag, iterations)[unknown_idxs] # pylint: disable=unsupported-assignment-operation
+        previous_iterations[unknown_idxs] = _get_iters_from_re_im(real, imag, max_iterations)[unknown_idxs] # pylint: disable=unsupported-assignment-operation
+    else:
+        real, imag = _get_real_imag_of_view(width, height, z_center, z_width)
+        previous_iterations = _get_iters_from_re_im(real, imag, max_iterations)
 
-    inside_mandelbrot = iters == -1
-    outside_mandelbrot = np.logical_not(inside_mandelbrot)
-
-    hue = np.empty([width,height],dtype=np.uint8)
-    hue[outside_mandelbrot] = ((iters * color_cycle_speed) % 256)[outside_mandelbrot]
-
-    saturation_brightness = np.full([width, height], 255, dtype=np.uint8)
-    # pixels inside the mandelbrot set should be black -> 0 brightness/saturation:
-    saturation_brightness[inside_mandelbrot] = 0
-
-    return np.dstack((hue, saturation_brightness, saturation_brightness))
+    return previous_iterations
