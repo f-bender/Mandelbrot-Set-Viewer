@@ -1,7 +1,4 @@
-
-
 # pylint: disable-all
-from distutils import command
 import tkinter as tk
 from tkinter import ttk
 

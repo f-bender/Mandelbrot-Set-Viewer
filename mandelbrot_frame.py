@@ -10,7 +10,7 @@ from PIL import Image, ImageTk
 from mandelbrot_iterations_calculator import get_iterations_per_pixel
 from tkinter_helpers import CreateToolTip, Mbox
 
-class FractalFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-instance-attributes
+class MandelbrotFrame(tk.Frame): # pylint: disable=too-many-ancestors, too-many-instance-attributes
     ''' A class for showing mandelbrot-set-like fractals in a tkinter frame
     '''
 
@@ -411,14 +411,14 @@ def main():
     args = parser.parse_args()
 
     root = tk.Tk()
-    root.title('Mandelbrot Set')
+    root.title('Mandelbrot Set Viewer')
     root.protocol('WM_DELETE_WINDOW', root.destroy)
     if args.fullscreen:
         root.attributes('-fullscreen', True)
     else:
         root.geometry(f'{args.width}x{args.height}')
 
-    FractalFrame(
+    MandelbrotFrame(
         master=root,
         z_center=complex(args.center[0], args.center[1]),
         zoom_level=args.zoom_level,
